@@ -41,7 +41,10 @@ class PatientScaffold extends StatelessWidget {
               backgroundColor: navbarBackgroundColor,
             ),
             Expanded(
-              child: body,
+              child: SafeArea(
+                top: false,
+                child: body,
+              ),
             ),
           ],
         ),
