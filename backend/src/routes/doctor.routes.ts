@@ -14,6 +14,7 @@ import {
     updateProfilePicture,
     updateReport,
     getReport,
+    UpdateInstructions,
 } from '@alias/controllers/doctor.controller'
 import {
     createPatient,
@@ -21,6 +22,7 @@ import {
     ReassignPatientSchema,
     UpdateNextReviewSchema,
     UpdateReportSchema,
+    UpdateInstructionsSchema,
     updateProfile
 } from '@alias/validators/doctor.validator'
 import multer from 'multer'
@@ -71,6 +73,7 @@ router.route('/patients/:op_num/reports').get(authenticate, AllowDoctor, getRepo
 router.route('/patients/:op_num/reports/:report_id').get(authenticate, AllowDoctor, getReport).put(authenticate, AllowDoctor, validate(UpdateReportSchema), updateReport)
 
 router.put('/patients/:op_num/config', authenticate, AllowDoctor, validate(UpdateNextReviewSchema), updateNextReview)
+router.put('/patients/:op_num/instructions', authenticate, AllowDoctor, validate(UpdateInstructionsSchema), UpdateInstructions)
 router.route('/profile').get(authenticate, AllowDoctor, getProfile).put(authenticate, AllowDoctor, validate(updateProfile), UpdateProfile)
 router.get('/doctors', authenticate, AllowDoctor, getDoctors)
 router.post("/profile-pic", authenticate, AllowDoctor, uploadProfilePicture, updateProfilePicture)

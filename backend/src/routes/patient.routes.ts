@@ -11,8 +11,17 @@ import {
 	updateHealthLogs,
 	updateProfilePicture,
 	updateProfile,
+	getDoctorUpdates,
+	markDoctorUpdateAsRead,
 } from '@alias/controllers/patient.controller'
-import { reportSchema, takeDosageSchema, updateHealthLogSchema, updateProfileSchema } from '@alias/validators/patient.validator'
+import {
+	reportSchema,
+	takeDosageSchema,
+	updateHealthLogSchema,
+	updateProfileSchema,
+	doctorUpdatesQuerySchema,
+	markDoctorUpdateReadSchema
+} from '@alias/validators/patient.validator'
 import { ApiError } from '@alias/utils'
 import { StatusCodes } from 'http-status-codes'
 
@@ -87,6 +96,8 @@ router.get('/missed-doses', authenticate, AllowPatient, missedDoses)
 router.get('/dosage-calendar', authenticate, AllowPatient, getDosageCalendar)
 router.post('/dosage', authenticate, AllowPatient, validate(takeDosageSchema), takeDosage)
 router.post('/health-logs', authenticate, AllowPatient, validate(updateHealthLogSchema), updateHealthLogs)
+router.get('/doctor-updates', authenticate, AllowPatient, validate(doctorUpdatesQuerySchema), getDoctorUpdates)
+router.patch('/doctor-updates/:event_id/read', authenticate, AllowPatient, validate(markDoctorUpdateReadSchema), markDoctorUpdateAsRead)
 router.post("/profile-pic", authenticate, AllowPatient, uploadProfilePictureFile, updateProfilePicture)
 
 export default router

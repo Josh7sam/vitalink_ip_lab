@@ -6,6 +6,7 @@ const UserSchema = new mongoose.Schema({
   login_id: {
     type: String,
     required: [true, 'Login ID is required'],
+    trim: true,
     unique: true
   },
   password: {
@@ -43,6 +44,10 @@ UserSchema.pre('validate', async function () {
   }
 
   this.user_type_model = map[this.user_type]
+
+  if (typeof this.login_id === 'string') {
+    this.login_id = this.login_id.trim()
+  }
 
   if (this.isModified('password')) {
     this.salt = generateSalt()

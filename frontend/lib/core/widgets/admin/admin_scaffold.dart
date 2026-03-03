@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_tanstack_query/flutter_tanstack_query.dart';
 import 'package:frontend/app/routers.dart';
 import 'package:frontend/core/di/app_dependencies.dart';
 import 'package:frontend/core/widgets/common/logout_dialog.dart';
@@ -198,6 +199,7 @@ class _AdminNavigationRail extends StatelessWidget {
       builder: (_) => LogoutDialog(
         onLogout: () async {
           await AppDependencies.secureStorage.clearAll();
+          await QueryCache.instance.clear();
           if (context.mounted) {
             Navigator.of(
               context,

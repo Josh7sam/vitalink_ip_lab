@@ -3,7 +3,14 @@ import { ApiError, ApiResponse, asyncHandler } from '@alias/utils'
 import { StatusCodes } from 'http-status-codes'
 import { PatientProfile, User } from '@alias/models'
 import { UserType } from '@alias/validators'
-import type { ReportInput, TakeDosageInput, UpdateHealthLog, UpdateProfileInput } from '@alias/validators/patient.validator'
+import type {
+	DoctorUpdatesQueryInput,
+	MarkDoctorUpdateReadInput,
+	ReportInput,
+	TakeDosageInput,
+	UpdateHealthLog,
+	UpdateProfileInput
+} from '@alias/validators/patient.validator'
 import logger from '@alias/utils/logger'
 import { uploadFile, getDownloadUrl } from '@alias/utils/fileUpload'
 
@@ -23,6 +30,18 @@ const getPatientProfileOrThrow = async (profileId: unknown, notFoundMessage = 'P
 	return patientProfile
 }
 
+const getDoctorChangeEventsFromProfile = (patientProfile: any) => {
+	const events = Array.isArray(patientProfile?.doctor_change_events)
+		? patientProfile.doctor_change_events
+		: []
+
+	return events.sort((a: any, b: any) => {
+		const aTime = new Date(a?.created_at || 0).getTime()
+		const bTime = new Date(b?.created_at || 0).getTime()
+		return bTime - aTime
+	})
+}
+
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
 	const { user_id } = req.user
 	const user = await User.findById(user_id).populate({
@@ -37,7 +56,18 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
 	if (!user || user.user_type !== UserType.PATIENT) {
 		throw new ApiError(StatusCodes.NOT_FOUND, 'Patient not found')
 	}
-	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Profile fetched successfully', { patient: user }))
+
+	const profile = user.profile_id as any
+	const doctorChangeEvents = getDoctorChangeEventsFromProfile(profile)
+	const unreadDoctorUpdates = doctorChangeEvents.filter((event: any) => !event?.is_read).length
+
+	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Profile fetched successfully', {
+		patient: user,
+		doctor_updates: {
+			unread_count: unreadDoctorUpdates,
+			latest: doctorChangeEvents[0] ?? null,
+		}
+	}))
 })
 
 export const getReport = asyncHandler(async (req: Request, res: Response) => {
@@ -373,6 +403,48 @@ export const updateProfilePicture = asyncHandler(async (req: Request, res: Respo
 
 	await PatientProfile.findByIdAndUpdate(user.profile_id, { profile_picture_url: fileUrl }, { new: true })
 	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, "Profile Picture successfully changed"))
+})
+
+
+export const getDoctorUpdates = asyncHandler(async (
+	req: Request<{}, {}, {}, DoctorUpdatesQueryInput['query']>,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+	const patientProfile = await getPatientProfileOrThrow(patientUser.profile_id)
+
+	const unreadOnly = req.query.unread_only === 'true'
+	const parsedLimit = req.query.limit ? parseInt(req.query.limit, 10) : 20
+	const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20
+
+	let events = getDoctorChangeEventsFromProfile(patientProfile)
+	if (unreadOnly) {
+		events = events.filter((event: any) => !event?.is_read)
+	}
+
+	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Doctor updates fetched successfully', {
+		updates: events.slice(0, limit)
+	}))
+})
+
+export const markDoctorUpdateAsRead = asyncHandler(async (
+	req: Request<MarkDoctorUpdateReadInput['params']>,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+	const { event_id } = req.params
+
+	const patientProfile = await PatientProfile.findOneAndUpdate(
+		{ _id: patientUser.profile_id, 'doctor_change_events._id': event_id },
+		{ $set: { 'doctor_change_events.$.is_read': true } },
+		{ new: true }
+	)
+
+	if (!patientProfile) {
+		throw new ApiError(StatusCodes.NOT_FOUND, 'Doctor update not found')
+	}
+
+	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Doctor update marked as read'))
 })
 
 function parseDDMMYYYY(date: string | Date): Date {

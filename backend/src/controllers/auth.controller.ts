@@ -9,10 +9,17 @@ import { ChangePasswordInput, LoginInput } from '@alias/validators/user.validato
 
 export const loginController = asyncHandler(async (req: Request<{}, {}, LoginInput["body"]>, res: Response) => {
   const { login_id, password } = req.body;
-  const user = await User.findOne({ login_id })
-  if (!user) {
+  const normalizedLoginId = login_id.trim()
+
+  const matchedUsers = await User.find({ login_id: normalizedLoginId }).limit(2)
+  if (matchedUsers.length === 0) {
     throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid credentials')
   }
+  if (matchedUsers.length > 1) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Multiple accounts found for this login ID. Please contact support.')
+  }
+
+  const user = matchedUsers[0]
   if (!user.is_active) {
     throw new ApiError(StatusCodes.FORBIDDEN, 'Account is inactive. Please contact support.')
   }

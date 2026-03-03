@@ -23,10 +23,12 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
           final profile = await PatientService.getProfile();
           final history = await PatientService.getINRHistory();
           final latest = await PatientService.getLatestINR();
+          final doctorUpdates = await PatientService.getDoctorUpdates(limit: 5);
           return {
             'profile': profile,
             'history': history,
             'latest': latest,
+            'doctorUpdates': doctorUpdates,
           };
         },
       ),
@@ -69,6 +71,7 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
 
         final data = query.data!;
         final profile = data['profile'] as Map<String, dynamic>;
+        final doctorUpdates = (data['doctorUpdates'] as List?)?.cast<Map<String, dynamic>>() ?? [];
 
         return PatientScaffold(
           pageTitle: 'My Profile',
@@ -90,6 +93,12 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                     profile: profile,
                     onProfileUpdated: () => query.refetch(),
                   ),
+                  const SizedBox(height: 20),
+                  _DoctorUpdatesCard(
+                    updates: doctorUpdates,
+                    unreadCount: (profile['doctorUpdatesUnreadCount'] as num?)?.toInt() ?? 0,
+                  ),
+
                 ],
               ),
             ),
@@ -108,5 +117,92 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
       case 3: Navigator.of(context).pushReplacementNamed(AppRoutes.patientHealthReports); break;
       case 4: break;
     }
+  }
+}
+
+class _DoctorUpdatesCard extends StatelessWidget {
+  const _DoctorUpdatesCard({
+    required this.updates,
+    required this.unreadCount,
+  });
+
+  final List<Map<String, dynamic>> updates;
+  final int unreadCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.notifications_active_outlined, size: 20, color: Color(0xFF2563EB)),
+              const SizedBox(width: 8),
+              const Text(
+                'Doctor Updates',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              ),
+              const Spacer(),
+              if (unreadCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEF4444),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$unreadCount new',
+                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (updates.isEmpty)
+            const Text(
+              'No recent doctor changes.',
+              style: TextStyle(color: Color(0xFF6B7280)),
+            )
+          else
+            ...updates.map((event) => Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: event['isRead'] == true ? const Color(0xFFF9FAFB) : const Color(0xFFEEF2FF),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          event['title']?.toString() ?? 'Doctor update',
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          event['message']?.toString() ?? '',
+                          style: const TextStyle(color: Color(0xFF374151), fontSize: 13),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          event['createdAt']?.toString() ?? '',
+                          style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                )),
+        ],
+      ),
+    );
   }
 }

@@ -59,6 +59,8 @@ class PatientService {
 
         final nextOfKin = demographics['next_of_kin'] is Map ? demographics['next_of_kin'] : {};
 
+        final doctorUpdates = response.data['data']['doctor_updates'] as Map<String, dynamic>?;
+
         return {
           'name': demographics['name'] ?? 'Patient',
           'opNumber': data['login_id'] ?? data['_id'] ?? 'N/A',
@@ -79,6 +81,8 @@ class PatientService {
           'weeklyDosage': profile['weekly_dosage'] ?? {},
           'healthLogs': profile['health_logs'] ?? [],
           'medicalHistory': profile['medical_history'] ?? [],
+          'doctorUpdatesUnreadCount': doctorUpdates?['unread_count'] ?? 0,
+          'latestDoctorUpdate': doctorUpdates?['latest'],
         };
       }
       throw Exception('Failed to load profile');
@@ -416,6 +420,49 @@ class PatientService {
       }
     } on DioException catch (e) {
       throw Exception('Error: ${e.message}');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getDoctorUpdates({
+    bool unreadOnly = false,
+    int limit = 20,
+  }) async {
+    _setupInterceptors();
+    try {
+      final response = await _dio.get('/doctor-updates', queryParameters: {
+        'unread_only': unreadOnly.toString(),
+        'limit': limit,
+      });
+
+      if (response.statusCode == 200) {
+        final updates = response.data['data']['updates'] as List? ?? const [];
+        return updates.map((event) {
+          final item = Map<String, dynamic>.from(event as Map);
+          return {
+            'id': item['_id']?.toString() ?? '',
+            'title': item['title']?.toString() ?? 'Doctor update',
+            'message': item['message']?.toString() ?? '',
+            'changeType': item['change_type']?.toString() ?? '',
+            'createdAt': formatDate(item['created_at']),
+            'isRead': item['is_read'] == true,
+          };
+        }).toList();
+      }
+      return [];
+    } on DioException catch (e) {
+      throw Exception('Error loading doctor updates: ${e.message}');
+    }
+  }
+
+  static Future<void> markDoctorUpdateAsRead(String eventId) async {
+    _setupInterceptors();
+    try {
+      final response = await _dio.patch('/doctor-updates/$eventId/read');
+      if (response.statusCode != 200) {
+        throw Exception('Failed to mark doctor update as read');
+      }
+    } on DioException catch (e) {
+      throw Exception('Error updating doctor update status: ${e.message}');
     }
   }
 }

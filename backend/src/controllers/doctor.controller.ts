@@ -17,6 +17,8 @@ import { getDownloadUrl, uploadFile } from '@alias/utils/fileUpload'
 import logger from '@alias/utils/logger'
 import { getObjectIdString } from '@alias/utils/objectid'
 
+const normalizeLoginId = (value: string) => value.trim()
+
 const getDoctorOwnershipIds = (doctor: { _id: unknown; profile_id?: unknown }): string[] => {
   const ids = new Set<string>()
   const userId = getObjectIdString(doctor._id)
@@ -42,11 +44,15 @@ const getDoctorUserOrThrow = async (userId: string) => {
 }
 
 const getPatientUserOrThrow = async (op_num: string) => {
-  const patientUser = await User.findOne({ login_id: op_num, user_type: UserType.PATIENT })
-  if (!patientUser) {
+  const normalizedOpNum = normalizeLoginId(op_num)
+  const patientUsers = await User.find({ login_id: normalizedOpNum, user_type: UserType.PATIENT }).limit(2)
+  if (patientUsers.length === 0) {
     throw new ApiError(StatusCodes.NOT_FOUND, 'Patient not found')
   }
-  return patientUser
+  if (patientUsers.length > 1) {
+    throw new ApiError(StatusCodes.CONFLICT, 'Multiple patient accounts found for this OP number. Please contact support.')
+  }
+  return patientUsers[0]
 }
 
 const getPatientProfileOrThrow = async (profileId: unknown, notFoundMessage = 'Patient not found') => {
@@ -56,6 +62,24 @@ const getPatientProfileOrThrow = async (profileId: unknown, notFoundMessage = 'P
   }
   return patient
 }
+
+type DoctorChangeType = 'DOCTOR_REASSIGNED' | 'DOSAGE_UPDATED' | 'REPORT_UPDATED' | 'NEXT_REVIEW_UPDATED' | 'INSTRUCTIONS_UPDATED'
+
+const buildDoctorChangeEvent = (
+  doctorId: unknown,
+  changeType: DoctorChangeType,
+  title: string,
+  message: string,
+  changedFields: string[] = []
+) => ({
+  changed_by_doctor_id: doctorId,
+  change_type: changeType,
+  title,
+  message,
+  changed_fields: changedFields,
+  is_read: false,
+  created_at: new Date(),
+})
 
 export const getPatients = asyncHandler(async (req: Request, res: Response) => {
   const { user_id } = req.user
@@ -107,7 +131,9 @@ export const addPatient = asyncHandler(async (req: Request<{}, {}, CreatePatient
   const { name, op_num, age, gender, contact_no, target_inr_min, target_inr_max, therapy, therapy_start_date,
     prescription, medical_history, kin_name, kin_relation, kin_contact_number } = req.body
 
-  const existingUser = await User.findOne({ login_id: op_num })
+  const normalizedOpNum = normalizeLoginId(op_num)
+
+  const existingUser = await User.findOne({ login_id: normalizedOpNum })
   if (existingUser) {
     throw new ApiError(StatusCodes.CONFLICT, 'Patient with this OP number already exists')
   }
@@ -146,7 +172,7 @@ export const addPatient = asyncHandler(async (req: Request<{}, {}, CreatePatient
   })
 
   const tempPassword = contact_no
-  await User.create({ login_id: op_num, password: tempPassword, user_type: UserType.PATIENT, profile_id: patientProfile._id })
+  await User.create({ login_id: normalizedOpNum, password: tempPassword, user_type: UserType.PATIENT, profile_id: patientProfile._id })
 
   res.status(StatusCodes.CREATED).json(new ApiResponse(StatusCodes.CREATED, 'Patient created successfully', { patient: patientProfile }))
 })
@@ -165,14 +191,25 @@ export const reassignPatient = asyncHandler(async (
     throw new ApiError(StatusCodes.FORBIDDEN, 'Unauthorized Patient Access')
   }
 
-  const doctorUser = await User.findOne({ login_id: new_doctor_id, user_type: UserType.DOCTOR })
+  const doctorUser = await User.findOne({ login_id: normalizeLoginId(new_doctor_id), user_type: UserType.DOCTOR })
   if (!doctorUser) {
     throw new ApiError(StatusCodes.BAD_REQUEST, 'Target doctor not found')
   }
 
   const patient = await PatientProfile.findByIdAndUpdate(
     patientUser.profile_id,
-    { assigned_doctor_id: doctorUser._id },
+    {
+      $set: { assigned_doctor_id: doctorUser._id },
+      $push: {
+        doctor_change_events: buildDoctorChangeEvent(
+          currentDoctorUser._id,
+          'DOCTOR_REASSIGNED',
+          'Doctor assignment changed',
+          `Your case was reassigned to doctor ${new_doctor_id}.`,
+          ['assigned_doctor_id']
+        )
+      }
+    },
     { new: true }
   )
 
@@ -195,7 +232,18 @@ export const editPatientDosage = asyncHandler(async (
 
   const patient = await PatientProfile.findByIdAndUpdate(
     patientUser.profile_id,
-    { weekly_dosage: prescription },
+    {
+      $set: { weekly_dosage: prescription },
+      $push: {
+        doctor_change_events: buildDoctorChangeEvent(
+          doctor._id,
+          'DOSAGE_UPDATED',
+          'Dosage updated',
+          'Your weekly dosage plan was updated by your doctor.',
+          ['weekly_dosage']
+        )
+      }
+    },
     { new: true }
   )
 
@@ -253,6 +301,18 @@ export const updateReport = asyncHandler(async (req: Request<UpdateReportInput['
   if (notes !== undefined) report.notes = notes;
   if (is_critical !== undefined) report.is_critical = is_critical;
 
+  const changedFields: string[] = []
+  if (notes !== undefined) changedFields.push('inr_history.notes')
+  if (is_critical !== undefined) changedFields.push('inr_history.is_critical')
+
+  patientProfile.doctor_change_events.push(buildDoctorChangeEvent(
+    doctor._id,
+    'REPORT_UPDATED',
+    'Report updated',
+    'Your uploaded INR report has new doctor notes or status updates.',
+    changedFields
+  ) as any)
+
   await patientProfile.save()
 
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Report updated successfully', { report }))
@@ -282,7 +342,18 @@ export const updateNextReview = asyncHandler(async (
 
   const patient = await PatientProfile.findByIdAndUpdate(
     patientUser.profile_id,
-    { 'medical_config.next_review_date': parsedDate },
+    {
+      $set: { 'medical_config.next_review_date': parsedDate },
+      $push: {
+        doctor_change_events: buildDoctorChangeEvent(
+          doctor._id,
+          'NEXT_REVIEW_UPDATED',
+          'Next review updated',
+          `Your next review date was updated to ${date}.`,
+          ['medical_config.next_review_date']
+        )
+      }
+    },
     { new: true }
   )
 
@@ -305,7 +376,18 @@ export const UpdateInstructions = asyncHandler(async (
 
   const patient = await PatientProfile.findByIdAndUpdate(
     patientUser.profile_id,
-    { 'medical_config.instructions': instructions },
+    {
+      $set: { 'medical_config.instructions': instructions },
+      $push: {
+        doctor_change_events: buildDoctorChangeEvent(
+          doctor._id,
+          'INSTRUCTIONS_UPDATED',
+          'Instructions updated',
+          'Your doctor updated your care instructions.',
+          ['medical_config.instructions']
+        )
+      }
+    },
     { new: true }
   )
 

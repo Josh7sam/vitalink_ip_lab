@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_tanstack_query/flutter_tanstack_query.dart';
 import 'package:frontend/core/di/app_dependencies.dart';
 import 'package:frontend/core/storage/secure_storage.dart';
 import 'package:frontend/app/routers.dart';
@@ -466,6 +467,7 @@ class PatientActionButtons extends StatelessWidget {
   Future<void> _performLogout(BuildContext context) async {
     final SecureStorage secureStorage = AppDependencies.secureStorage;
     await secureStorage.clearAll();
+    await QueryCache.instance.clear();
     if (context.mounted) {
       Navigator.of(context).pushNamedAndRemoveUntil(
         AppRoutes.login,

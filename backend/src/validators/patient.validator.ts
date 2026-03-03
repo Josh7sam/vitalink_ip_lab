@@ -65,3 +65,20 @@ export const updateProfileSchema = z.object({
 })
 
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>
+
+export const doctorUpdatesQuerySchema = z.object({
+    query: z.object({
+        unread_only: z.enum(['true', 'false']).optional(),
+        limit: z.string().regex(/^\d+$/, 'Limit should be a valid number').optional(),
+    }).strict()
+})
+
+export type DoctorUpdatesQueryInput = z.infer<typeof doctorUpdatesQuerySchema>
+
+export const markDoctorUpdateReadSchema = z.object({
+    params: z.object({
+        event_id: z.string('event_id should be a valid string').regex(/^[a-f\d]{24}$/i, 'event_id must be a valid ObjectId')
+    }).strict()
+})
+
+export type MarkDoctorUpdateReadInput = z.infer<typeof markDoctorUpdateReadSchema>
