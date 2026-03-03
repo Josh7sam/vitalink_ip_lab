@@ -4,7 +4,8 @@ import 'package:frontend/core/network/api_client.dart';
 import 'package:frontend/core/storage/secure_storage.dart';
 
 class PatientRepository {
-  PatientRepository({required ApiClient apiClient, SecureStorage? secureStorage})
+  PatientRepository(
+      {required ApiClient apiClient, SecureStorage? secureStorage})
       : _apiClient = apiClient,
         _secureStorage = secureStorage ?? SecureStorage();
 
@@ -52,10 +53,9 @@ class PatientRepository {
         ? demographics['next_of_kin'] as Map<String, dynamic>
         : <String, dynamic>{};
 
-    final doctorUpdates =
-        data['doctor_updates'] is Map<String, dynamic>
-            ? data['doctor_updates'] as Map<String, dynamic>
-            : null;
+    final doctorUpdates = data['doctor_updates'] is Map<String, dynamic>
+        ? data['doctor_updates'] as Map<String, dynamic>
+        : null;
 
     return {
       'name': demographics['name'] ?? 'Patient',
@@ -87,7 +87,8 @@ class PatientRepository {
     final recent = response['recent_missed_doses'];
     final missed = response['missed_doses'];
     return {
-      'recent_missed_doses': recent is List ? recent.cast<String>() : <String>[],
+      'recent_missed_doses':
+          recent is List ? recent.cast<String>() : <String>[],
       'missed_doses': missed is List ? missed.cast<String>() : <String>[],
     };
   }
@@ -234,14 +235,15 @@ class PatientRepository {
     }
 
     final prescriptions = <Map<String, dynamic>>[];
-    final medicalConfig = report['medical_config'] as Map<String, dynamic>? ?? {};
+    final medicalConfig =
+        report['medical_config'] as Map<String, dynamic>? ?? {};
     final weeklyDosage = report['weekly_dosage'] as Map<String, dynamic>? ?? {};
 
     final therapyDrug = medicalConfig['therapy_drug'];
     if (therapyDrug != null) {
       prescriptions.add({
         'drug': therapyDrug,
-        'dosage': weeklyDosage['monday']?[0]?['dose'] ?? '5mg',
+        'dosage': '${weeklyDosage['monday'] ?? 5}mg',
         'frequency': 'As per schedule',
         'startDate': formatDate(medicalConfig['therapy_start_date']),
         'instructions': (medicalConfig['instructions'] as List?)?.join(', ') ??

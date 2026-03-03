@@ -2,7 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class PatientService {
-  static const String baseUrl = 'https://vitalink-ip-lab-1.onrender.com/api/patient';
+  static const String baseUrl =
+      'https://vitalink-ip-lab-1.onrender.com/api/patient';
   static const storage = FlutterSecureStorage();
 
   static final Dio _dio = Dio(
@@ -41,10 +42,14 @@ class PatientService {
         }
 
         final profile = data['profile_id'] as Map<String, dynamic>;
-        final demographics = profile['demographics'] is Map ? profile['demographics'] : {};
-        final medicalConfig = profile['medical_config'] is Map ? profile['medical_config'] : {};
-        final targetInr = medicalConfig['target_inr'] is Map ? medicalConfig['target_inr'] : {};
-        
+        final demographics =
+            profile['demographics'] is Map ? profile['demographics'] : {};
+        final medicalConfig =
+            profile['medical_config'] is Map ? profile['medical_config'] : {};
+        final targetInr = medicalConfig['target_inr'] is Map
+            ? medicalConfig['target_inr']
+            : {};
+
         // Handle doctor information safely
         String doctorName = 'Dr. Rajesh Kumar';
         String doctorPhone = 'N/A';
@@ -57,9 +62,12 @@ class PatientService {
           }
         }
 
-        final nextOfKin = demographics['next_of_kin'] is Map ? demographics['next_of_kin'] : {};
+        final nextOfKin = demographics['next_of_kin'] is Map
+            ? demographics['next_of_kin']
+            : {};
 
-        final doctorUpdates = response.data['data']['doctor_updates'] as Map<String, dynamic>?;
+        final doctorUpdates =
+            response.data['data']['doctor_updates'] as Map<String, dynamic>?;
 
         return {
           'name': demographics['name'] ?? 'Patient',
@@ -67,7 +75,8 @@ class PatientService {
           'age': demographics['age'] ?? 0,
           'gender': demographics['gender'] ?? 'N/A',
           'phone': demographics['phone'] ?? 'N/A',
-          'targetINR': '${targetInr['min'] ?? 2.0} - ${targetInr['max'] ?? 3.0}',
+          'targetINR':
+              '${targetInr['min'] ?? 2.0} - ${targetInr['max'] ?? 3.0}',
           'nextReviewDate': formatDate(medicalConfig['next_review_date']),
           'therapyDrug': medicalConfig['therapy_drug'] ?? 'N/A',
           'therapyStartDate': formatDate(medicalConfig['therapy_start_date']),
@@ -188,17 +197,20 @@ class PatientService {
         queryParams['start_date'] = startDate;
       }
 
-      final response = await _dio.get('/dosage-calendar', queryParameters: queryParams);
-      
+      final response =
+          await _dio.get('/dosage-calendar', queryParameters: queryParams);
+
       if (response.statusCode == 200) {
         final data = response.data['data'];
         return {
-          'calendar_data': (data['calendar_data'] as List).map((item) => {
-            'date': item['date'] as String,
-            'status': item['status'] as String,
-            'dosage': (item['dosage'] as num).toDouble(),
-            'day_of_week': item['day_of_week'] as String,
-          }).toList(),
+          'calendar_data': (data['calendar_data'] as List)
+              .map((item) => {
+                    'date': item['date'] as String,
+                    'status': item['status'] as String,
+                    'dosage': (item['dosage'] as num).toDouble(),
+                    'day_of_week': item['day_of_week'] as String,
+                  })
+              .toList(),
           'date_range': {
             'start': data['date_range']['start'] as String,
             'end': data['date_range']['end'] as String,
@@ -217,7 +229,8 @@ class PatientService {
     try {
       final response = await _dio.get('/reports');
       if (response.statusCode == 200) {
-        final inrHistory = response.data['data']['report']['inr_history'] as List;
+        final inrHistory =
+            response.data['data']['report']['inr_history'] as List;
         return inrHistory.map((item) {
           return {
             'id': item['_id'],
@@ -251,10 +264,13 @@ class PatientService {
         if (therapyDrug != null) {
           prescriptions.add({
             'drug': therapyDrug,
-            'dosage': report['weekly_dosage']['monday']?[0]?['dose'] ?? '5mg',
+            'dosage': '${report['weekly_dosage']?['monday'] ?? 5}mg',
             'frequency': 'As per schedule',
-            'startDate': formatDate(report['medical_config']['therapy_start_date']),
-            'instructions': (report['medical_config']['instructions'] as List?)?.join(', ') ?? 'Follow doctor instructions',
+            'startDate':
+                formatDate(report['medical_config']['therapy_start_date']),
+            'instructions': (report['medical_config']['instructions'] as List?)
+                    ?.join(', ') ??
+                'Follow doctor instructions',
           });
         }
 
@@ -263,7 +279,8 @@ class PatientService {
           'drug': 'Aspirin',
           'dosage': '75mg',
           'frequency': 'Once daily',
-          'startDate': formatDate(report['medical_config']['therapy_start_date']),
+          'startDate':
+              formatDate(report['medical_config']['therapy_start_date']),
           'instructions': 'Take in the morning with food',
         });
 
@@ -280,7 +297,8 @@ class PatientService {
     try {
       final response = await _dio.get('/reports');
       if (response.statusCode == 200) {
-        final inrHistory = response.data['data']['report']['inr_history'] as List;
+        final inrHistory =
+            response.data['data']['report']['inr_history'] as List;
         if (inrHistory.isEmpty) {
           return {
             'value': 0.0,
@@ -303,7 +321,8 @@ class PatientService {
             continue;
           }
 
-          if (entryDate != null && (latestDate == null || entryDate.isAfter(latestDate))) {
+          if (entryDate != null &&
+              (latestDate == null || entryDate.isAfter(latestDate))) {
             latestEntry = entry;
             latestDate = entryDate;
           }
@@ -400,21 +419,21 @@ class PatientService {
     _setupInterceptors();
     try {
       final Map<String, dynamic> data = {};
-      
+
       if (demographics != null) {
         data['demographics'] = demographics;
       }
-      
+
       if (medicalHistory != null) {
         data['medical_history'] = medicalHistory;
       }
-      
+
       if (medicalConfig != null) {
         data['medical_config'] = medicalConfig;
       }
 
       final response = await _dio.put('/profile', data: data);
-      
+
       if (response.statusCode != 200) {
         throw Exception('Failed to update profile');
       }
