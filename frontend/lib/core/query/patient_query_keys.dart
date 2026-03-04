@@ -12,6 +12,8 @@ class PatientQueryKeys {
   static List<Object> inrHistory() => [...all(), 'inr_history'];
   static List<Object> doctorUpdatesUnread() =>
       [...all(), 'doctor_updates_unread'];
+  static List<Object> notificationsUnread() => [...all(), 'notifications_unread'];
+  static List<Object> notifications() => [...all(), 'notifications'];
   static List<Object> dosageCalendar(int months) =>
       [...all(), 'dosage_calendar', months];
 

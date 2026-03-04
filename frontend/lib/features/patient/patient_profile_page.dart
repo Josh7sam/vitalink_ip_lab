@@ -21,7 +21,6 @@ class PatientProfilePage extends StatefulWidget {
 
 class _PatientProfilePageState extends State<PatientProfilePage> {
   final int _currentNavIndex = 4;
-  bool _autoReadInProgress = false;
 
   @override
   Widget build(BuildContext context) {
@@ -80,38 +79,6 @@ class _PatientProfilePageState extends State<PatientProfilePage> {
                 [];
         final unreadCount =
             (profile['doctorUpdatesUnreadCount'] as num?)?.toInt() ?? 0;
-
-        if (!_autoReadInProgress &&
-            unreadCount > 0 &&
-            doctorUpdates.isNotEmpty) {
-          _autoReadInProgress = true;
-          final queryClient = QueryClientProvider.of(context);
-          WidgetsBinding.instance.addPostFrameCallback((_) async {
-            try {
-              final unreadUpdates = doctorUpdates.where((event) {
-                final eventId = event['id']?.toString() ?? '';
-                final isRead = event['isRead'] == true;
-                return eventId.isNotEmpty && !isRead;
-              }).toList();
-
-              for (final event in unreadUpdates) {
-                await AppDependencies.patientRepository
-                    .markDoctorUpdateAsRead(event['id'].toString());
-              }
-
-              if (mounted) {
-                queryClient.invalidateQueries(
-                  PatientQueryKeys.doctorUpdatesUnread(),
-                );
-                await query.refetch();
-              }
-            } catch (_) {
-              // Ignore transient failures; user can refresh to retry.
-            } finally {
-              _autoReadInProgress = false;
-            }
-          });
-        }
 
         return _buildPageContainer(
           bodyDecoration: const BoxDecoration(

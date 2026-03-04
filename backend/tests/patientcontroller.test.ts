@@ -2,7 +2,8 @@ import axios, { AxiosInstance } from 'axios';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import mongoose from 'mongoose';
 import app from '@alias/app';
-import { User, DoctorProfile, PatientProfile } from '@alias/models';
+import { User, DoctorProfile, PatientProfile, Notification } from '@alias/models';
+import { NotificationType } from '@alias/models/notification.model';
 import { Server } from 'http';
 
 describe('Patient Routes', () => {
@@ -764,6 +765,238 @@ describe('Patient Routes', () => {
 
             expect(response.status).toBe(401);
             expect(response.data.success).toBe(false);
+        });
+    });
+
+    describe('Doctor update notifications', () => {
+        beforeEach(async () => {
+            await Notification.deleteMany({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+            });
+        });
+
+        test('should include unread count and latest doctor update in profile response', async () => {
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Older update',
+                message: 'Older message',
+                is_read: false,
+                createdAt: new Date('2026-01-10T10:00:00.000Z'),
+                updatedAt: new Date('2026-01-10T10:00:00.000Z'),
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Latest update',
+                message: 'Latest message',
+                is_read: true,
+                createdAt: new Date('2026-01-11T10:00:00.000Z'),
+                updatedAt: new Date('2026-01-11T10:00:00.000Z'),
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+
+            const response = await api.get('/api/patient/profile', {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.data.doctor_updates.unread_count).toBe(1);
+            expect(response.data.data.doctor_updates.latest.title).toBe('Latest update');
+        });
+
+        test('should return only unread doctor updates when unread_only=true', async () => {
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Unread update',
+                message: 'Unread message',
+                is_read: false,
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Read update',
+                message: 'Read message',
+                is_read: true,
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+
+            const response = await api.get('/api/patient/doctor-updates?unread_only=true&limit=20', {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+            expect(response.data.data.updates.length).toBe(1);
+            expect(response.data.data.updates[0].title).toBe('Unread update');
+            expect(response.data.data.updates[0].is_read).toBe(false);
+        });
+
+        test('should return doctor updates summary', async () => {
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Summary older',
+                message: 'Older summary message',
+                is_read: false,
+                createdAt: new Date('2026-02-01T10:00:00.000Z'),
+                updatedAt: new Date('2026-02-01T10:00:00.000Z'),
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Summary latest',
+                message: 'Latest summary message',
+                is_read: true,
+                createdAt: new Date('2026-02-02T10:00:00.000Z'),
+                updatedAt: new Date('2026-02-02T10:00:00.000Z'),
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+
+            const response = await api.get('/api/patient/doctor-updates/summary', {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+            expect(response.data.data.unread_count).toBe(1);
+            expect(response.data.data.latest.title).toBe('Summary latest');
+        });
+
+        test('should mark all doctor updates as read', async () => {
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Unread update 1',
+                message: 'Unread message 1',
+                is_read: false,
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Unread update 2',
+                message: 'Unread message 2',
+                is_read: false,
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+
+            const markResponse = await api.patch('/api/patient/doctor-updates/read-all', {}, {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(markResponse.status).toBe(200);
+            expect(markResponse.data.success).toBe(true);
+            expect(markResponse.data.data.marked_count).toBe(2);
+
+            const profileResponse = await api.get('/api/patient/profile', {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(profileResponse.status).toBe(200);
+            expect(profileResponse.data.data.doctor_updates.unread_count).toBe(0);
+        });
+
+        test('should include persisted notification-based doctor updates', async () => {
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE,
+                title: 'Doctor updated instructions',
+                message: 'Please follow the revised care plan.',
+                is_read: false,
+                data: {
+                    change_type: 'INSTRUCTIONS_UPDATED',
+                    changed_fields: ['medical_config.instructions'],
+                }
+            });
+
+            const response = await api.get('/api/patient/doctor-updates?limit=20', {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+            expect(response.data.data.updates.length).toBeGreaterThan(0);
+            const item = response.data.data.updates.find(
+                (u: any) => u.title === 'Doctor updated instructions'
+            );
+            expect(item).toBeDefined();
+            expect(item.is_read).toBe(false);
+            expect(item.change_type).toBe('INSTRUCTIONS_UPDATED');
+        });
+    });
+
+    describe('General notifications', () => {
+        beforeEach(async () => {
+            await Notification.deleteMany({ user_id: patientUser._id });
+        });
+
+        test('should list notifications with unread count', async () => {
+            await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.SYSTEM_ANNOUNCEMENT,
+                title: 'System alert',
+                message: 'Please review the latest guidance.',
+                is_read: false,
+            });
+
+            const response = await api.get('/api/patient/notifications?page=1&limit=20', {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+            expect(response.data.data.unread_count).toBe(1);
+            expect(Array.isArray(response.data.data.notifications)).toBe(true);
+        });
+
+        test('should mark a notification as read', async () => {
+            const created = await Notification.create({
+                user_id: patientUser._id,
+                type: NotificationType.SYSTEM_ANNOUNCEMENT,
+                title: 'Read me',
+                message: 'Mark this as read',
+                is_read: false,
+            });
+
+            const response = await api.patch(`/api/patient/notifications/${created._id}/read`, {}, {
+                headers: { Authorization: `Bearer ${patientToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+
+            const fresh = await Notification.findById(created._id);
+            expect(fresh?.is_read).toBe(true);
         });
     });
 

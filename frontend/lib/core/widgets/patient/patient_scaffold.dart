@@ -11,6 +11,8 @@ class PatientScaffold extends StatelessWidget {
   final Color navbarBackgroundColor;
   final Decoration? bodyDecoration;
   final int unreadDoctorUpdatesCount;
+  final VoidCallback? onNotificationPressed;
+  final int notificationBadgeCount;
 
   const PatientScaffold({
     super.key,
@@ -22,6 +24,8 @@ class PatientScaffold extends StatelessWidget {
     this.navbarBackgroundColor = Colors.white,
     this.bodyDecoration,
     this.unreadDoctorUpdatesCount = 0,
+    this.onNotificationPressed,
+    this.notificationBadgeCount = 0,
   });
 
   @override
@@ -42,6 +46,8 @@ class PatientScaffold extends StatelessWidget {
             AppNavBar(
               pageTitle: pageTitle,
               backgroundColor: navbarBackgroundColor,
+              onNotificationPressed: onNotificationPressed,
+              notificationBadgeCount: notificationBadgeCount,
             ),
             Expanded(
               child: SafeArea(

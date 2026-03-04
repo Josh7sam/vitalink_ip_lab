@@ -1,6 +1,7 @@
 import mongoose from 'mongoose'
 
 export enum NotificationType {
+  DOCTOR_UPDATE = 'DOCTOR_UPDATE',
   INR_REMINDER = 'INR_REMINDER',
   DOSAGE_REMINDER = 'DOSAGE_REMINDER',
   CRITICAL_ALERT = 'CRITICAL_ALERT',

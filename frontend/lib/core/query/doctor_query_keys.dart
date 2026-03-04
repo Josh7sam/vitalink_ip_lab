@@ -11,6 +11,8 @@ class DoctorQueryKeys {
       [...all(), 'patient', opNumber];
   static List<Object> patientReports(String opNumber) =>
       [...all(), 'patient', opNumber, 'reports'];
+  static List<Object> notificationsUnread() => [...all(), 'notifications_unread'];
+  static List<Object> notifications() => [...all(), 'notifications'];
 
   static String get _scope => AppDependencies.secureStorage.sessionScope;
 }

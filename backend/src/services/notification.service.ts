@@ -3,6 +3,7 @@ import { NotificationType, NotificationPriority } from '@alias/models/notificati
 import { UserType } from '@alias/validators'
 import { ApiError } from '@alias/utils'
 import { StatusCodes } from 'http-status-codes'
+import { publishNotificationToUser } from '@alias/services/realtime-notification.service'
 
 export type BroadcastTarget = 'ALL' | 'DOCTORS' | 'PATIENTS' | 'SPECIFIC'
 
@@ -49,6 +50,19 @@ export async function broadcastNotification(
   }))
 
   const created = await Notification.insertMany(notifications)
+
+  for (const notification of created) {
+    publishNotificationToUser(String(notification.user_id), 'notification', {
+      id: String(notification._id),
+      title: notification.title,
+      message: notification.message,
+      type: notification.type,
+      priority: notification.priority,
+      is_read: notification.is_read,
+      created_at: notification.createdAt,
+      data: notification.data,
+    })
+  }
 
   return {
     message: 'Notification broadcast successful',
@@ -98,4 +112,12 @@ export async function markNotificationRead(notificationId: string, userId: strin
     { new: true }
   )
   return notification
+}
+
+export async function markAllNotificationsRead(userId: string) {
+  const result = await Notification.updateMany(
+    { user_id: userId, is_read: false },
+    { is_read: true, read_at: new Date() }
+  )
+  return result.modifiedCount ?? 0
 }

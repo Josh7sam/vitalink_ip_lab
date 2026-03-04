@@ -262,7 +262,11 @@ class _PatientRecordsPageState extends State<PatientRecordsPage> {
         else
           ...history.map((record) {
             final status = record['status'] as String? ?? 'Normal';
-            final isCritical = status == 'High' || status == 'Low';
+            final isCritical =
+                record['isCritical'] == true ||
+                status == 'Critical' ||
+                status == 'High' ||
+                status == 'Low';
 
             return Card(
               elevation: 1,

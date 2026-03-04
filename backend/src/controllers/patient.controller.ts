@@ -1,11 +1,18 @@
 import { Request, Response } from 'express'
 import { ApiError, ApiResponse, asyncHandler } from '@alias/utils'
 import { StatusCodes } from 'http-status-codes'
-import { PatientProfile, User } from '@alias/models'
+import { Notification, PatientProfile, User } from '@alias/models'
+import { NotificationType } from '@alias/models/notification.model'
 import { UserType } from '@alias/validators'
+import { getSystemConfig } from '@alias/services/config.service'
+import * as notificationService from '@alias/services/notification.service'
+import { extractTokenFromHeader, verifyToken } from '@alias/utils/jwt.utils'
+import { registerUserNotificationStream } from '@alias/services/realtime-notification.service'
 import type {
 	DoctorUpdatesQueryInput,
+	MarkNotificationReadInput,
 	MarkDoctorUpdateReadInput,
+	NotificationsQueryInput,
 	ReportInput,
 	TakeDosageInput,
 	UpdateHealthLog,
@@ -13,6 +20,29 @@ import type {
 } from '@alias/validators/patient.validator'
 import logger from '@alias/utils/logger'
 import { uploadFile, getDownloadUrl } from '@alias/utils/fileUpload'
+
+type DoctorUpdateEvent = {
+	_id: string
+	title: string
+	message: string
+	change_type: string
+	changed_fields: string[]
+	is_read: boolean
+	created_at: Date
+	changed_by_doctor_id?: unknown
+}
+
+type AppNotificationItem = {
+	_id: string
+	title: string
+	message: string
+	type: string
+	priority: string
+	is_read: boolean
+	created_at: Date
+	read_at?: Date
+	data?: unknown
+}
 
 const getPatientUserOrThrow = async (userId: string, notFoundMessage = 'Patient not found') => {
 	const patientUser = await User.findById(userId)
@@ -30,16 +60,71 @@ const getPatientProfileOrThrow = async (profileId: unknown, notFoundMessage = 'P
 	return patientProfile
 }
 
-const getDoctorChangeEventsFromProfile = (patientProfile: any) => {
-	const events = Array.isArray(patientProfile?.doctor_change_events)
-		? patientProfile.doctor_change_events
-		: []
+const mapNotificationToDoctorUpdateEvent = (notification: any): DoctorUpdateEvent => ({
+	_id: String(notification?._id ?? ''),
+	title: notification?.title ?? 'Doctor update',
+	message: notification?.message ?? '',
+	change_type: notification?.data?.change_type ?? 'DOCTOR_UPDATE',
+	changed_fields: Array.isArray(notification?.data?.changed_fields)
+		? notification.data.changed_fields
+		: [],
+	is_read: notification?.is_read === true,
+	created_at: notification?.createdAt ? new Date(notification.createdAt) : new Date(0),
+	changed_by_doctor_id: notification?.data?.changed_by_doctor_id,
+})
 
-	return events.sort((a: any, b: any) => {
-		const aTime = new Date(a?.created_at || 0).getTime()
-		const bTime = new Date(b?.created_at || 0).getTime()
-		return bTime - aTime
-	})
+const mapNotificationToAppNotificationItem = (notification: any): AppNotificationItem => ({
+	_id: String(notification?._id ?? ''),
+	title: notification?.title ?? 'Notification',
+	message: notification?.message ?? '',
+	type: String(notification?.type ?? 'GENERAL'),
+	priority: String(notification?.priority ?? 'MEDIUM'),
+	is_read: notification?.is_read === true,
+	created_at: notification?.createdAt ? new Date(notification.createdAt) : new Date(0),
+	read_at: notification?.read_at ? new Date(notification.read_at) : undefined,
+	data: notification?.data,
+})
+
+const getDoctorUpdateNotifications = async (
+	patientUserId: unknown,
+	unreadOnly: boolean,
+	limit?: number
+) => {
+	const notificationQuery: any = {
+		user_id: patientUserId,
+		type: NotificationType.DOCTOR_UPDATE,
+	}
+	if (unreadOnly) {
+		notificationQuery.is_read = false
+	}
+
+	const notificationCursor = Notification.find(notificationQuery)
+		.sort({ createdAt: -1 })
+	if (limit && Number.isFinite(limit) && limit > 0) {
+		notificationCursor.limit(limit)
+	}
+	return notificationCursor.lean()
+}
+
+const resolvePatientStreamUserOrThrow = async (req: Request) => {
+	const headerToken = extractTokenFromHeader(req.headers.authorization)
+	const queryToken = typeof req.query.token === 'string' ? req.query.token : null
+	const token = headerToken || queryToken
+	if (!token) {
+		throw new ApiError(StatusCodes.UNAUTHORIZED, 'Missing authentication token')
+	}
+
+	const payload = verifyToken(token)
+	if (!payload || payload.user_type !== UserType.PATIENT) {
+		throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid or expired authentication token')
+	}
+
+	const user = await User.findById(payload.user_id).select('_id user_type is_active')
+	if (!user || user.user_type !== UserType.PATIENT || !user.is_active) {
+		throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid or expired authentication token')
+	}
+
+	return user
 }
 
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
@@ -57,15 +142,23 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
 		throw new ApiError(StatusCodes.NOT_FOUND, 'Patient not found')
 	}
 
-	const profile = user.profile_id as any
-	const doctorChangeEvents = getDoctorChangeEventsFromProfile(profile)
-	const unreadDoctorUpdates = doctorChangeEvents.filter((event: any) => !event?.is_read).length
+	const [latestDoctorNotification, unreadDoctorUpdates] = await Promise.all([
+		Notification.findOne({
+			user_id: user._id,
+			type: NotificationType.DOCTOR_UPDATE,
+		}).sort({ createdAt: -1 }).lean(),
+		Notification.countDocuments({
+			user_id: user._id,
+			type: NotificationType.DOCTOR_UPDATE,
+			is_read: false
+		})
+	])
 
 	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Profile fetched successfully', {
 		patient: user,
 		doctor_updates: {
 			unread_count: unreadDoctorUpdates,
-			latest: doctorChangeEvents[0] ?? null,
+			latest: latestDoctorNotification ? mapNotificationToDoctorUpdateEvent(latestDoctorNotification) : null,
 		}
 	}))
 })
@@ -133,6 +226,10 @@ export const submitReport = asyncHandler(async (req: Request<{}, {}, ReportInput
 		}
 	}
 
+	const systemConfig = await getSystemConfig()
+	const { criticalLow, criticalHigh } = getSafeInrThresholds(systemConfig?.inr_thresholds)
+	const isCritical = parsed_inr_value < criticalLow || parsed_inr_value > criticalHigh
+
 	const patient = await PatientProfile.findByIdAndUpdate(
 		patientUser.profile_id,
 		{
@@ -141,6 +238,7 @@ export const submitReport = asyncHandler(async (req: Request<{}, {}, ReportInput
 					test_date: parsedTestDate,
 					uploaded_at: new Date(),
 					inr_value: parsed_inr_value,
+					is_critical: isCritical,
 					file_url: fileUrl,
 				},
 			},
@@ -411,20 +509,45 @@ export const getDoctorUpdates = asyncHandler(async (
 	res: Response
 ) => {
 	const patientUser = await getPatientUserOrThrow(req.user.user_id)
-	const patientProfile = await getPatientProfileOrThrow(patientUser.profile_id)
 
 	const unreadOnly = req.query.unread_only === 'true'
 	const parsedLimit = req.query.limit ? parseInt(req.query.limit, 10) : 20
 	const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20
 
-	let events = getDoctorChangeEventsFromProfile(patientProfile)
-	if (unreadOnly) {
-		events = events.filter((event: any) => !event?.is_read)
-	}
+	const doctorNotifications = await getDoctorUpdateNotifications(patientUser._id, unreadOnly, limit)
+	const notificationEvents = doctorNotifications.map(mapNotificationToDoctorUpdateEvent)
 
 	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Doctor updates fetched successfully', {
-		updates: events.slice(0, limit)
+		updates: notificationEvents.slice(0, limit)
 	}))
+})
+
+export const getDoctorUpdatesSummary = asyncHandler(async (
+	req: Request,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+
+	const [latestDoctorNotification, unreadDoctorUpdates] = await Promise.all([
+		Notification.findOne({
+			user_id: patientUser._id,
+			type: NotificationType.DOCTOR_UPDATE,
+		}).sort({ createdAt: -1 }).lean(),
+		Notification.countDocuments({
+			user_id: patientUser._id,
+			type: NotificationType.DOCTOR_UPDATE,
+			is_read: false
+		})
+	])
+
+	res.status(StatusCodes.OK).json(new ApiResponse(
+		StatusCodes.OK,
+		'Doctor updates summary fetched successfully',
+		{
+			unread_count: unreadDoctorUpdates,
+			latest: latestDoctorNotification ? mapNotificationToDoctorUpdateEvent(latestDoctorNotification) : null,
+		}
+	))
 })
 
 export const markDoctorUpdateAsRead = asyncHandler(async (
@@ -434,17 +557,110 @@ export const markDoctorUpdateAsRead = asyncHandler(async (
 	const patientUser = await getPatientUserOrThrow(req.user.user_id)
 	const { event_id } = req.params
 
-	const patientProfile = await PatientProfile.findOneAndUpdate(
-		{ _id: patientUser.profile_id, 'doctor_change_events._id': event_id },
-		{ $set: { 'doctor_change_events.$.is_read': true } },
+	const notification = await Notification.findOneAndUpdate(
+		{
+			_id: event_id,
+			user_id: patientUser._id,
+			type: NotificationType.DOCTOR_UPDATE,
+		},
+		{ is_read: true, read_at: new Date() },
 		{ new: true }
 	)
 
-	if (!patientProfile) {
-		throw new ApiError(StatusCodes.NOT_FOUND, 'Doctor update not found')
+	if (notification) {
+		res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Doctor update marked as read'))
+		return
+	}
+	throw new ApiError(StatusCodes.NOT_FOUND, 'Doctor update not found')
+})
+
+export const markAllDoctorUpdatesAsRead = asyncHandler(async (
+	req: Request,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+	const markResult = await Notification.updateMany(
+		{
+			user_id: patientUser._id,
+			type: NotificationType.DOCTOR_UPDATE,
+			is_read: false,
+		},
+		{ is_read: true, read_at: new Date() }
+	)
+	const markedCount = markResult.modifiedCount ?? 0
+
+	res.status(StatusCodes.OK).json(new ApiResponse(
+		StatusCodes.OK,
+		'All doctor updates marked as read',
+		{ marked_count: markedCount }
+	))
+})
+
+export const getNotifications = asyncHandler(async (
+	req: Request<{}, {}, {}, NotificationsQueryInput['query']>,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+
+	const parsedPage = req.query.page ? parseInt(req.query.page, 10) : 1
+	const parsedLimit = req.query.limit ? parseInt(req.query.limit, 10) : 20
+	const page = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1
+	const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20
+	const isReadFilter = req.query.is_read === undefined ? undefined : req.query.is_read === 'true'
+
+	const { notifications, pagination } = await notificationService.getUserNotifications(
+		String(patientUser._id),
+		{ is_read: isReadFilter },
+		{ page, limit }
+	)
+
+	const unreadCount = await Notification.countDocuments({
+		user_id: patientUser._id,
+		is_read: false,
+	})
+
+	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Notifications fetched successfully', {
+		notifications: notifications.map(mapNotificationToAppNotificationItem),
+		pagination,
+		unread_count: unreadCount,
+	}))
+})
+
+export const markNotificationAsRead = asyncHandler(async (
+	req: Request<MarkNotificationReadInput['params']>,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+	const { notification_id } = req.params
+
+	const notification = await notificationService.markNotificationRead(
+		notification_id,
+		String(patientUser._id),
+	)
+	if (!notification) {
+		throw new ApiError(StatusCodes.NOT_FOUND, 'Notification not found')
 	}
 
-	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Doctor update marked as read'))
+	res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Notification marked as read'))
+})
+
+export const markAllNotificationsAsRead = asyncHandler(async (
+	req: Request,
+	res: Response
+) => {
+	const patientUser = await getPatientUserOrThrow(req.user.user_id)
+	const markedCount = await notificationService.markAllNotificationsRead(String(patientUser._id))
+
+	res.status(StatusCodes.OK).json(new ApiResponse(
+		StatusCodes.OK,
+		'All notifications marked as read',
+		{ marked_count: markedCount }
+	))
+})
+
+export const streamNotifications = asyncHandler(async (req: Request, res: Response) => {
+	const patientUser = await resolvePatientStreamUserOrThrow(req)
+	registerUserNotificationStream(String(patientUser._id), res)
 })
 
 function parseDDMMYYYY(date: string | Date): Date {
@@ -558,4 +774,18 @@ function findMissedDoses(medicationDates: string[], takenDates: Array<Date | str
 		return new Date(ay, am - 1, ad).getTime() - new Date(by, bm - 1, bd).getTime()
 	})
 	return missed
+}
+
+function getSafeInrThresholds(thresholds: { critical_low?: number; critical_high?: number } | undefined) {
+	const defaultThresholds = { criticalLow: 1.5, criticalHigh: 4.5 }
+	const rawLow = thresholds?.critical_low
+	const rawHigh = thresholds?.critical_high
+	const criticalLow = typeof rawLow === 'number' && Number.isFinite(rawLow) ? rawLow : defaultThresholds.criticalLow
+	const criticalHigh = typeof rawHigh === 'number' && Number.isFinite(rawHigh) ? rawHigh : defaultThresholds.criticalHigh
+
+	if (criticalLow >= criticalHigh) {
+		return defaultThresholds
+	}
+
+	return { criticalLow, criticalHigh }
 }

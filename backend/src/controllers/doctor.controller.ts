@@ -1,11 +1,13 @@
 import { Request, Response } from 'express'
 import { ApiError, ApiResponse, asyncHandler } from '@alias/utils'
 import { StatusCodes } from 'http-status-codes'
-import { DoctorProfile, PatientProfile, User } from '@alias/models'
+import { DoctorProfile, Notification, PatientProfile, User } from '@alias/models'
 import { UserType } from '@alias/validators'
 import type {
   CreatePatientInput,
   EditPatientDosageInput,
+  MarkNotificationReadInput,
+  NotificationsQueryInput,
   ReassignPatientInput,
   UpdateInstructionsInput,
   UpdateNextReviewInput,
@@ -16,6 +18,13 @@ import mongoose from 'mongoose'
 import { getDownloadUrl, uploadFile } from '@alias/utils/fileUpload'
 import logger from '@alias/utils/logger'
 import { getObjectIdString } from '@alias/utils/objectid'
+import { extractTokenFromHeader, verifyToken } from '@alias/utils/jwt.utils'
+import { registerUserNotificationStream } from '@alias/services/realtime-notification.service'
+import * as notificationService from '@alias/services/notification.service'
+import {
+  DoctorChangeType,
+  createDoctorUpdateNotification
+} from '@alias/services/doctor-update-notification.service'
 
 const normalizeLoginId = (value: string) => value.trim()
 
@@ -63,23 +72,56 @@ const getPatientProfileOrThrow = async (profileId: unknown, notFoundMessage = 'P
   return patient
 }
 
-type DoctorChangeType = 'DOCTOR_REASSIGNED' | 'DOSAGE_UPDATED' | 'REPORT_UPDATED' | 'NEXT_REVIEW_UPDATED' | 'INSTRUCTIONS_UPDATED'
-
-const buildDoctorChangeEvent = (
+const notifyPatientDoctorUpdate = async (
+  patientUserId: unknown,
   doctorId: unknown,
   changeType: DoctorChangeType,
   title: string,
   message: string,
   changedFields: string[] = []
-) => ({
-  changed_by_doctor_id: doctorId,
-  change_type: changeType,
-  title,
-  message,
-  changed_fields: changedFields,
-  is_read: false,
-  created_at: new Date(),
+) => {
+  await createDoctorUpdateNotification({
+    patientUserId,
+    changedByDoctorId: doctorId,
+    changeType,
+    title,
+    message,
+    changedFields,
+  })
+}
+
+const mapNotificationToAppNotificationItem = (notification: any) => ({
+  _id: String(notification?._id ?? ''),
+  title: notification?.title ?? 'Notification',
+  message: notification?.message ?? '',
+  type: String(notification?.type ?? 'GENERAL'),
+  priority: String(notification?.priority ?? 'MEDIUM'),
+  is_read: notification?.is_read === true,
+  created_at: notification?.createdAt ? new Date(notification.createdAt) : new Date(0),
+  read_at: notification?.read_at ? new Date(notification.read_at) : undefined,
+  data: notification?.data,
 })
+
+const resolveDoctorStreamUserOrThrow = async (req: Request) => {
+  const headerToken = extractTokenFromHeader(req.headers.authorization)
+  const queryToken = typeof req.query.token === 'string' ? req.query.token : null
+  const token = headerToken || queryToken
+  if (!token) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Missing authentication token')
+  }
+
+  const payload = verifyToken(token)
+  if (!payload || payload.user_type !== UserType.DOCTOR) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid or expired authentication token')
+  }
+
+  const user = await User.findById(payload.user_id).select('_id user_type is_active')
+  if (!user || user.user_type !== UserType.DOCTOR || !user.is_active) {
+    throw new ApiError(StatusCodes.UNAUTHORIZED, 'Invalid or expired authentication token')
+  }
+
+  return user
+}
 
 export const getPatients = asyncHandler(async (req: Request, res: Response) => {
   const { user_id } = req.user
@@ -200,17 +242,17 @@ export const reassignPatient = asyncHandler(async (
     patientUser.profile_id,
     {
       $set: { assigned_doctor_id: doctorUser._id },
-      $push: {
-        doctor_change_events: buildDoctorChangeEvent(
-          currentDoctorUser._id,
-          'DOCTOR_REASSIGNED',
-          'Doctor assignment changed',
-          `Your case was reassigned to doctor ${new_doctor_id}.`,
-          ['assigned_doctor_id']
-        )
-      }
     },
     { new: true }
+  )
+
+  await notifyPatientDoctorUpdate(
+    patientUser._id,
+    currentDoctorUser._id,
+    'DOCTOR_REASSIGNED',
+    'Doctor assignment changed',
+    `Your case was reassigned to doctor ${new_doctor_id}.`,
+    ['assigned_doctor_id']
   )
 
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Patient reassigned successfully', { patient }))
@@ -234,17 +276,17 @@ export const editPatientDosage = asyncHandler(async (
     patientUser.profile_id,
     {
       $set: { weekly_dosage: prescription },
-      $push: {
-        doctor_change_events: buildDoctorChangeEvent(
-          doctor._id,
-          'DOSAGE_UPDATED',
-          'Dosage updated',
-          'Your weekly dosage plan was updated by your doctor.',
-          ['weekly_dosage']
-        )
-      }
     },
     { new: true }
+  )
+
+  await notifyPatientDoctorUpdate(
+    patientUser._id,
+    doctor._id,
+    'DOSAGE_UPDATED',
+    'Dosage updated',
+    'Your weekly dosage plan was updated by your doctor.',
+    ['weekly_dosage']
   )
 
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Dosage updated successfully', { patient }))
@@ -305,15 +347,18 @@ export const updateReport = asyncHandler(async (req: Request<UpdateReportInput['
   if (notes !== undefined) changedFields.push('inr_history.notes')
   if (is_critical !== undefined) changedFields.push('inr_history.is_critical')
 
-  patientProfile.doctor_change_events.push(buildDoctorChangeEvent(
-    doctor._id,
-    'REPORT_UPDATED',
-    'Report updated',
-    'Your uploaded INR report has new doctor notes or status updates.',
-    changedFields
-  ) as any)
-
   await patientProfile.save()
+
+  if (changedFields.length > 0) {
+    await notifyPatientDoctorUpdate(
+      patientUser._id,
+      doctor._id,
+      'REPORT_UPDATED',
+      'Report updated',
+      'Your uploaded INR report has new doctor notes or status updates.',
+      changedFields
+    )
+  }
 
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Report updated successfully', { report }))
 })
@@ -344,17 +389,17 @@ export const updateNextReview = asyncHandler(async (
     patientUser.profile_id,
     {
       $set: { 'medical_config.next_review_date': parsedDate },
-      $push: {
-        doctor_change_events: buildDoctorChangeEvent(
-          doctor._id,
-          'NEXT_REVIEW_UPDATED',
-          'Next review updated',
-          `Your next review date was updated to ${date}.`,
-          ['medical_config.next_review_date']
-        )
-      }
     },
     { new: true }
+  )
+
+  await notifyPatientDoctorUpdate(
+    patientUser._id,
+    doctor._id,
+    'NEXT_REVIEW_UPDATED',
+    'Next review updated',
+    `Your next review date was updated to ${date}.`,
+    ['medical_config.next_review_date']
   )
 
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Next review date updated successfully', { patient }))
@@ -378,17 +423,17 @@ export const UpdateInstructions = asyncHandler(async (
     patientUser.profile_id,
     {
       $set: { 'medical_config.instructions': instructions },
-      $push: {
-        doctor_change_events: buildDoctorChangeEvent(
-          doctor._id,
-          'INSTRUCTIONS_UPDATED',
-          'Instructions updated',
-          'Your doctor updated your care instructions.',
-          ['medical_config.instructions']
-        )
-      }
     },
     { new: true }
+  )
+
+  await notifyPatientDoctorUpdate(
+    patientUser._id,
+    doctor._id,
+    'INSTRUCTIONS_UPDATED',
+    'Instructions updated',
+    'Your doctor updated your care instructions.',
+    ['medical_config.instructions']
   )
 
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Instructions updated successfully', { patient }))
@@ -447,35 +492,6 @@ export const getDoctors = asyncHandler(async (req: Request, res: Response) => {
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, "Doctors fetched successfully", { doctors }))
 })
 
-export const updateReportsInstructions = asyncHandler(async (req: Request<UpdateReportInput["params"], {}, UpdateReportInput["body"]>, res: Response) => {
-  const { is_critical, notes } = req.body
-  const { report_id, op_num } = req.params
-
-  if (!mongoose.Types.ObjectId.isValid(report_id)) {
-    throw new ApiError(StatusCodes.BAD_REQUEST, 'Invalid report_id or op_num')
-  }
-
-  const doctor = await getDoctorUserOrThrow(req.user.user_id)
-  const patientUser = await getPatientUserOrThrow(op_num)
-  const patientProfile = await getPatientProfileOrThrow(patientUser.profile_id)
-
-  if (!isDoctorOwnerOfPatient(patientProfile, doctor)) {
-    throw new ApiError(StatusCodes.FORBIDDEN, 'Unauthorized Doctor to View The Patient')
-  }
-
-  const report = patientProfile.inr_history.id(report_id)
-  if (!report) {
-    throw new ApiError(StatusCodes.NOT_FOUND, 'Report not found')
-  }
-
-  if (is_critical !== undefined) report.is_critical = is_critical;
-  if (notes !== undefined) report.notes = notes;
-
-  await patientProfile.save()
-
-  res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Report instructions updated successfully'))
-})
-
 export const getReport = asyncHandler(async (req: Request, res: Response) => {
   const { report_id, op_num } = req.params
 
@@ -525,4 +541,71 @@ export const updateProfilePicture = asyncHandler(async (req: Request, res: Respo
 
   await DoctorProfile.findByIdAndUpdate(user.profile_id, { profile_picture_url: fileUrl }, { new: true })
   res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, "Profile Picture successfully changed"))
+})
+
+export const getDoctorNotifications = asyncHandler(async (
+  req: Request<{}, {}, {}, NotificationsQueryInput['query']>,
+  res: Response
+) => {
+  const doctorUser = await getDoctorUserOrThrow(req.user.user_id)
+
+  const parsedPage = req.query.page ? parseInt(req.query.page, 10) : 1
+  const parsedLimit = req.query.limit ? parseInt(req.query.limit, 10) : 20
+  const page = Number.isFinite(parsedPage) ? Math.max(parsedPage, 1) : 1
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20
+  const isReadFilter = req.query.is_read === undefined ? undefined : req.query.is_read === 'true'
+
+  const { notifications, pagination } = await notificationService.getUserNotifications(
+    String(doctorUser._id),
+    { is_read: isReadFilter },
+    { page, limit }
+  )
+
+  const unreadCount = await Notification.countDocuments({
+    user_id: doctorUser._id,
+    is_read: false,
+  })
+
+  res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Notifications fetched successfully', {
+    notifications: notifications.map(mapNotificationToAppNotificationItem),
+    pagination,
+    unread_count: unreadCount,
+  }))
+})
+
+export const markDoctorNotificationAsRead = asyncHandler(async (
+  req: Request<MarkNotificationReadInput['params']>,
+  res: Response
+) => {
+  const doctorUser = await getDoctorUserOrThrow(req.user.user_id)
+  const { notification_id } = req.params
+
+  const notification = await notificationService.markNotificationRead(
+    notification_id,
+    String(doctorUser._id),
+  )
+  if (!notification) {
+    throw new ApiError(StatusCodes.NOT_FOUND, 'Notification not found')
+  }
+
+  res.status(StatusCodes.OK).json(new ApiResponse(StatusCodes.OK, 'Notification marked as read'))
+})
+
+export const markAllDoctorNotificationsAsRead = asyncHandler(async (
+  req: Request,
+  res: Response
+) => {
+  const doctorUser = await getDoctorUserOrThrow(req.user.user_id)
+  const markedCount = await notificationService.markAllNotificationsRead(String(doctorUser._id))
+
+  res.status(StatusCodes.OK).json(new ApiResponse(
+    StatusCodes.OK,
+    'All notifications marked as read',
+    { marked_count: markedCount },
+  ))
+})
+
+export const streamDoctorNotifications = asyncHandler(async (req: Request, res: Response) => {
+  const doctorUser = await resolveDoctorStreamUserOrThrow(req)
+  registerUserNotificationStream(String(doctorUser._id), res)
 })

@@ -1,42 +1,6 @@
 import mongoose from "mongoose";
 import { DosageScheduleSchema, InrLogSchema, HealthLogSchema } from "./index";
 
-const DoctorChangeEventSchema = new mongoose.Schema({
-  changed_by_doctor_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    index: true,
-  },
-  change_type: {
-    type: String,
-    enum: ['DOCTOR_REASSIGNED', 'DOSAGE_UPDATED', 'REPORT_UPDATED', 'NEXT_REVIEW_UPDATED', 'INSTRUCTIONS_UPDATED'],
-    required: true,
-  },
-  title: {
-    type: String,
-    required: true,
-  },
-  message: {
-    type: String,
-    required: true,
-  },
-  changed_fields: {
-    type: [String],
-    default: [],
-  },
-  is_read: {
-    type: Boolean,
-    default: false,
-    index: true,
-  },
-  created_at: {
-    type: Date,
-    default: Date.now,
-    index: true,
-  }
-}, { _id: true });
-
 const PatientProfileSchema = new mongoose.Schema({
   assigned_doctor_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -83,10 +47,6 @@ const PatientProfileSchema = new mongoose.Schema({
     default: 'Active'
   },
   profile_picture_url: { type: String },
-  doctor_change_events: {
-    type: [DoctorChangeEventSchema],
-    default: [],
-  },
 }, { timestamps: true });
 
 export interface PatientProfileDocument extends mongoose.Document, mongoose.InferSchemaType<typeof PatientProfileSchema> { }

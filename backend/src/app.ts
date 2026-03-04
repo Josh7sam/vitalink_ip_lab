@@ -30,6 +30,19 @@ if (corsAllowlist.size === 0) {
 }
 
 morgan.token('request-id', (req: Request) => (req as any).requestId ?? '-');
+morgan.token('safe-url', (req: Request) => {
+  const rawUrl = req.originalUrl || req.url || ''
+  if (!rawUrl.includes('?')) {
+    return rawUrl
+  }
+
+  const [path, queryString] = rawUrl.split('?')
+  const params = new URLSearchParams(queryString || '')
+  if (params.has('token')) {
+    params.set('token', '[redacted]')
+  }
+  return `${path}?${params.toString()}`
+});
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const incomingRequestId = req.header('x-request-id')?.trim();
@@ -43,7 +56,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-app.use(morgan(':method :url :status :res[content-length] - :response-time ms [request-id=:request-id]', {
+app.use(morgan(':method :safe-url :status :res[content-length] - :response-time ms [request-id=:request-id]', {
   stream: {
     write: message => {
       logger.info(message.trim());

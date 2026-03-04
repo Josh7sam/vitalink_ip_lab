@@ -12,7 +12,13 @@ import {
 	updateProfilePicture,
 	updateProfile,
 	getDoctorUpdates,
+	getDoctorUpdatesSummary,
+	getNotifications,
+	markAllNotificationsAsRead,
+	markNotificationAsRead,
 	markDoctorUpdateAsRead,
+	markAllDoctorUpdatesAsRead,
+	streamNotifications,
 } from '@alias/controllers/patient.controller'
 import {
 	reportSchema,
@@ -20,7 +26,9 @@ import {
 	updateHealthLogSchema,
 	updateProfileSchema,
 	doctorUpdatesQuerySchema,
-	markDoctorUpdateReadSchema
+	notificationsQuerySchema,
+	markNotificationReadSchema,
+	markDoctorUpdateReadSchema,
 } from '@alias/validators/patient.validator'
 import { ApiError } from '@alias/utils'
 import { StatusCodes } from 'http-status-codes'
@@ -96,7 +104,13 @@ router.get('/missed-doses', authenticate, AllowPatient, missedDoses)
 router.get('/dosage-calendar', authenticate, AllowPatient, getDosageCalendar)
 router.post('/dosage', authenticate, AllowPatient, validate(takeDosageSchema), takeDosage)
 router.post('/health-logs', authenticate, AllowPatient, validate(updateHealthLogSchema), updateHealthLogs)
+router.get('/notifications/stream', streamNotifications)
+router.get('/notifications', authenticate, AllowPatient, validate(notificationsQuerySchema), getNotifications)
+router.patch('/notifications/read-all', authenticate, AllowPatient, markAllNotificationsAsRead)
+router.patch('/notifications/:notification_id/read', authenticate, AllowPatient, validate(markNotificationReadSchema), markNotificationAsRead)
+router.get('/doctor-updates/summary', authenticate, AllowPatient, getDoctorUpdatesSummary)
 router.get('/doctor-updates', authenticate, AllowPatient, validate(doctorUpdatesQuerySchema), getDoctorUpdates)
+router.patch('/doctor-updates/read-all', authenticate, AllowPatient, markAllDoctorUpdatesAsRead)
 router.patch('/doctor-updates/:event_id/read', authenticate, AllowPatient, validate(markDoctorUpdateReadSchema), markDoctorUpdateAsRead)
 router.post("/profile-pic", authenticate, AllowPatient, uploadProfilePictureFile, updateProfilePicture)
 

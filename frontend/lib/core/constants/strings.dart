@@ -17,6 +17,12 @@ class AppStrings {
   static const String doctorPatientsPath = '/api/doctors/patients';
   static const String doctorProfilePath = '/api/doctors/profile';
   static const String doctorGetDoctorsPath = '/api/doctors/doctors';
+  static const String doctorNotificationsPath = '/api/doctors/notifications';
+  static const String doctorNotificationStreamPath =
+      '/api/doctors/notifications/stream';
+  static const String patientNotificationStreamPath =
+      '/api/patient/notifications/stream';
+  static const String patientNotificationsPath = '/api/patient/notifications';
 
   /// Admin endpoints.
   static const String adminBasePath = '/api/admin';

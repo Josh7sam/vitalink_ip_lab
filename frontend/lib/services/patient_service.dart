@@ -232,15 +232,18 @@ class PatientService {
         final inrHistory =
             response.data['data']['report']['inr_history'] as List;
         return inrHistory.map((item) {
+          final isCritical = item['is_critical'] == true;
           return {
             'id': item['_id'],
             'date': formatDate(item['test_date']),
             'inr': (item['inr_value'] as num).toDouble(),
             'notes': item['notes'] ?? '',
-            'isCritical': item['is_critical'] ?? false,
+            'isCritical': isCritical,
             'fileUrl': item['file_url'] ?? '',
             'uploadedAt': formatDate(item['uploaded_at']),
-            'status': _getINRStatus(item['inr_value'], 2.0, 3.0),
+            'status': isCritical
+                ? 'Critical'
+                : _getINRStatus(item['inr_value'], 2.0, 3.0),
           };
         }).toList();
       }

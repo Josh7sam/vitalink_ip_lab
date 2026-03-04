@@ -2,7 +2,8 @@ import axios, { AxiosInstance } from 'axios';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import mongoose from 'mongoose';
 import app from '@alias/app';
-import { User, DoctorProfile, PatientProfile } from '@alias/models';
+import { User, DoctorProfile, PatientProfile, Notification } from '@alias/models';
+import { NotificationType } from '@alias/models/notification.model';
 import { Server } from 'http';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3'
 import client from '@alias/config/s3-client'
@@ -427,6 +428,13 @@ describe('Doctor Routes', () => {
             expect(response.data.success).toBe(true);
             expect(response.data.data.patient).toBeDefined();
             expect(response.data.data.patient.weekly_dosage.monday).toBe(6);
+
+            const latestNotification = await Notification.findOne({
+                user_id: patientUser._id,
+                type: NotificationType.DOCTOR_UPDATE
+            }).sort({ createdAt: -1 });
+            expect(latestNotification).toBeDefined();
+            expect(latestNotification?.title).toBe('Dosage updated');
         });
 
         test('should update partial dosage schedule', async () => {
@@ -786,6 +794,51 @@ describe('Doctor Routes', () => {
         });
     });
 
+    describe('Doctor notifications', () => {
+        beforeEach(async () => {
+            await Notification.deleteMany({ user_id: doctorUser._id });
+        });
+
+        test('should list notifications with unread count', async () => {
+            await Notification.create({
+                user_id: doctorUser._id,
+                type: NotificationType.SYSTEM_ANNOUNCEMENT,
+                title: 'Doctor notice',
+                message: 'Please check the updated policy.',
+                is_read: false,
+            });
+
+            const response = await api.get('/api/doctors/notifications?page=1&limit=20', {
+                headers: { Authorization: `Bearer ${doctorToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+            expect(response.data.data.unread_count).toBe(1);
+            expect(Array.isArray(response.data.data.notifications)).toBe(true);
+        });
+
+        test('should mark a doctor notification as read', async () => {
+            const created = await Notification.create({
+                user_id: doctorUser._id,
+                type: NotificationType.SYSTEM_ANNOUNCEMENT,
+                title: 'Read me doctor',
+                message: 'Mark this one as read',
+                is_read: false,
+            });
+
+            const response = await api.patch(`/api/doctors/notifications/${created._id}/read`, {}, {
+                headers: { Authorization: `Bearer ${doctorToken}` }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+
+            const fresh = await Notification.findById(created._id);
+            expect(fresh?.is_read).toBe(true);
+        });
+    });
+
     describe('File Upload Routes - S3/Filebase Integration', () => {
         let uploadedReportKey: string;
         let uploadedProfilePicKey: string;
@@ -1007,4 +1060,3 @@ describe('Doctor Routes', () => {
         });
     });
 });
-

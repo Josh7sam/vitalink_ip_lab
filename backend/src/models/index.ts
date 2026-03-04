@@ -46,4 +46,3 @@ export { User, DoctorProfile, PatientProfile, AdminProfile, AuditLog, SystemConf
 // Aliases for backward compatibility
 export const Doctor = DoctorProfile
 export const Patient = PatientProfile
-

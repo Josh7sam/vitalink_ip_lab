@@ -82,3 +82,21 @@ export const markDoctorUpdateReadSchema = z.object({
 })
 
 export type MarkDoctorUpdateReadInput = z.infer<typeof markDoctorUpdateReadSchema>
+
+export const notificationsQuerySchema = z.object({
+    query: z.object({
+        page: z.string().regex(/^\d+$/, 'page should be a valid number').optional(),
+        limit: z.string().regex(/^\d+$/, 'limit should be a valid number').optional(),
+        is_read: z.enum(['true', 'false']).optional(),
+    }).strict()
+})
+
+export type NotificationsQueryInput = z.infer<typeof notificationsQuerySchema>
+
+export const markNotificationReadSchema = z.object({
+    params: z.object({
+        notification_id: z.string('notification_id should be a valid string').regex(/^[a-f\d]{24}$/i, 'notification_id must be a valid ObjectId')
+    }).strict()
+})
+
+export type MarkNotificationReadInput = z.infer<typeof markNotificationReadSchema>

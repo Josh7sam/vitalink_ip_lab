@@ -214,15 +214,18 @@ class PatientRepository {
 
     return inrHistory.map((item) {
       final entry = item as Map<String, dynamic>;
+      final isCritical = entry['is_critical'] == true;
       return {
         'id': entry['_id'],
         'date': formatDate(entry['test_date']),
         'inr': (entry['inr_value'] as num).toDouble(),
         'notes': entry['notes'] ?? '',
-        'isCritical': entry['is_critical'] ?? false,
+        'isCritical': isCritical,
         'fileUrl': entry['file_url'] ?? '',
         'uploadedAt': formatDate(entry['uploaded_at']),
-        'status': _getINRStatus(entry['inr_value'], 2.0, 3.0),
+        'status': isCritical
+            ? 'Critical'
+            : _getINRStatus(entry['inr_value'], 2.0, 3.0),
       };
     }).toList();
   }
@@ -338,8 +341,73 @@ class PatientRepository {
     }).toList();
   }
 
+  Future<Map<String, dynamic>> getDoctorUpdatesSummary() async {
+    final response = await _apiClient.get('$_patientBasePath/doctor-updates/summary');
+    return {
+      'unread_count': (response['unread_count'] as num?)?.toInt() ?? 0,
+      'latest': response['latest'],
+    };
+  }
+
+  Future<Map<String, dynamic>> getNotifications({
+    int page = 1,
+    int limit = 20,
+    bool? isRead,
+  }) async {
+    final raw = await _apiClient.getRaw(
+      AppStrings.patientNotificationsPath,
+      queryParameters: {
+        'page': page,
+        'limit': limit,
+        if (isRead != null) 'is_read': isRead.toString(),
+      },
+    );
+
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : <String, dynamic>{};
+    final notifications =
+        (data['notifications'] as List? ?? const []).map((item) {
+      final row = item as Map<String, dynamic>;
+      return {
+        'id': row['_id']?.toString() ?? '',
+        'title': row['title']?.toString() ?? 'Notification',
+        'message': row['message']?.toString() ?? '',
+        'type': row['type']?.toString() ?? 'GENERAL',
+        'priority': row['priority']?.toString() ?? 'MEDIUM',
+        'isRead': row['is_read'] == true,
+        'createdAt': formatDate(row['created_at']),
+      };
+    }).toList();
+
+    return {
+      'notifications': notifications,
+      'unreadCount': (data['unread_count'] as num?)?.toInt() ?? 0,
+      'pagination': data['pagination'] ?? <String, dynamic>{},
+    };
+  }
+
+  Future<int> getNotificationsUnreadCount() async {
+    final data = await getNotifications(page: 1, limit: 1);
+    return (data['unreadCount'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> markNotificationAsRead(String notificationId) async {
+    await _apiClient.patch(
+      '${AppStrings.patientNotificationsPath}/$notificationId/read',
+    );
+  }
+
+  Future<void> markAllNotificationsAsRead() async {
+    await _apiClient.patch('${AppStrings.patientNotificationsPath}/read-all');
+  }
+
   Future<void> markDoctorUpdateAsRead(String eventId) async {
     await _apiClient.patch('$_patientBasePath/doctor-updates/$eventId/read');
+  }
+
+  Future<void> markAllDoctorUpdatesAsRead() async {
+    await _apiClient.patch('$_patientBasePath/doctor-updates/read-all');
   }
 
   String formatDate(dynamic date) {

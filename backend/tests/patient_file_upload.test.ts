@@ -143,6 +143,7 @@ describe('Patient File Upload Routes', () => {
             expect(latestReport.file_url).toBeDefined();
             expect(latestReport.file_url).toContain('uploads/');
             expect(latestReport.inr_value).toBe(2.5);
+            expect(latestReport.is_critical).toBe(false);
         });
 
         test('should submit report with PNG image', async () => {
@@ -173,6 +174,45 @@ describe('Patient File Upload Routes', () => {
             const updatedPatient = await PatientProfile.findById(patientProfile._id);
             const latestReport = updatedPatient.inr_history[updatedPatient.inr_history.length - 1];
             uploadedReportKeys.push(latestReport.file_url);
+            expect(latestReport.is_critical).toBe(false);
+        });
+
+        test('should mark report as critical when INR is below configured low threshold', async () => {
+            const response = await api.post('/api/patient/reports', {
+                inr_value: '1.4',
+                test_date: '20-02-2026'
+            }, {
+                headers: {
+                    Authorization: `Bearer ${patientToken}`,
+                }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+
+            const updatedPatient = await PatientProfile.findById(patientProfile._id);
+            const latestReport = updatedPatient.inr_history[updatedPatient.inr_history.length - 1];
+            expect(latestReport.inr_value).toBe(1.4);
+            expect(latestReport.is_critical).toBe(true);
+        });
+
+        test('should mark report as critical when INR is above configured high threshold', async () => {
+            const response = await api.post('/api/patient/reports', {
+                inr_value: '4.6',
+                test_date: '21-02-2026'
+            }, {
+                headers: {
+                    Authorization: `Bearer ${patientToken}`,
+                }
+            });
+
+            expect(response.status).toBe(200);
+            expect(response.data.success).toBe(true);
+
+            const updatedPatient = await PatientProfile.findById(patientProfile._id);
+            const latestReport = updatedPatient.inr_history[updatedPatient.inr_history.length - 1];
+            expect(latestReport.inr_value).toBe(4.6);
+            expect(latestReport.is_critical).toBe(true);
         });
 
         test('should fail with invalid file type', async () => {

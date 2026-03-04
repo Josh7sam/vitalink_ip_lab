@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_tanstack_query/flutter_tanstack_query.dart';
+import 'package:frontend/app/routers.dart';
 import 'package:frontend/core/di/app_dependencies.dart';
 import 'package:frontend/core/query/doctor_query_keys.dart';
 import 'package:frontend/core/widgets/index.dart';
@@ -10,6 +13,7 @@ import 'package:frontend/features/doctor/add_patient_page.dart';
 import 'package:frontend/features/doctor/doctor_profile_page.dart';
 import 'package:frontend/features/doctor/doctor_reports_page.dart';
 import 'package:frontend/features/doctor/view_patient_page.dart';
+import 'package:frontend/services/realtime/doctor_update_realtime_service.dart';
 
 class DoctorDashboardPage extends StatefulWidget {
   const DoctorDashboardPage({super.key});
@@ -21,19 +25,73 @@ class DoctorDashboardPage extends StatefulWidget {
 class _DoctorDashboardPageState extends State<DoctorDashboardPage> {
   int _currentNavIndex = 0;
   bool _isTableView = false;
+  bool _notificationPopupScheduled = false;
+  final Set<String> _seenAnnouncementIds = <String>{};
   final TextEditingController _searchController = TextEditingController();
   final DoctorRepository _doctorRepository = AppDependencies.doctorRepository;
+  final DoctorUpdateRealtimeService _realtimeService =
+      DoctorUpdateRealtimeService();
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() {}));
+    unawaited(
+      _realtimeService.start(
+        onDoctorUpdate: _refreshNotificationsUnread,
+        onNotification: _handleRealtimeNotification,
+      ),
+    );
   }
 
   @override
   void dispose() {
+    unawaited(_realtimeService.stop());
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _handleRealtimeNotification(Map<String, dynamic> notification) {
+    if (!mounted) return;
+    _refreshNotificationsUnread();
+    if (_notificationPopupScheduled) return;
+
+    final type = notification['type']?.toString();
+    if (type != 'SYSTEM_ANNOUNCEMENT') return;
+
+    final id = notification['id']?.toString();
+    if (id == null || id.isEmpty) return;
+    if (_seenAnnouncementIds.contains(id)) return;
+    _seenAnnouncementIds.add(id);
+
+    _notificationPopupScheduled = true;
+
+    final title = notification['title']?.toString().trim().isNotEmpty == true
+        ? notification['title']!.toString()
+        : 'System announcement';
+    final message = notification['message']?.toString().trim().isNotEmpty == true
+        ? notification['message']!.toString()
+        : 'You have a new notification.';
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      ).whenComplete(() {
+        _notificationPopupScheduled = false;
+      });
+    });
   }
 
   List<PatientModel> _filteredPatients(List<PatientModel> patients) {
@@ -48,66 +106,89 @@ class _DoctorDashboardPageState extends State<DoctorDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    return DoctorScaffold(
-      pageTitle: _titleForIndex(_currentNavIndex),
-      currentNavIndex: _currentNavIndex,
-      onNavChanged: (index) {
-        setState(() => _currentNavIndex = index);
-      },
-      bodyDecoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFFC8B5E1), Color(0xFFF8C7D7)],
-        ),
+    return UseQuery<int>(
+      options: QueryOptions<int>(
+        queryKey: DoctorQueryKeys.notificationsUnread(),
+        queryFn: () async {
+          return AppDependencies.doctorRepository.getNotificationsUnreadCount();
+        },
       ),
-      body: SafeArea(
-        top: false,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 250),
-          layoutBuilder: (current, previousChildren) => Stack(
-            alignment: Alignment.topCenter,
-            children: [
-              ...previousChildren,
-              if (current != null)
-                Align(alignment: Alignment.topCenter, child: current),
-            ],
+      builder: (context, notificationQuery) {
+        final unreadNotifications = notificationQuery.data ?? 0;
+        return DoctorScaffold(
+          pageTitle: _titleForIndex(_currentNavIndex),
+          currentNavIndex: _currentNavIndex,
+          onNavChanged: (index) {
+            setState(() => _currentNavIndex = index);
+          },
+          notificationBadgeCount: unreadNotifications,
+          onNotificationPressed: () async {
+            await Navigator.of(context).pushNamed(AppRoutes.doctorNotifications);
+            _refreshNotificationsUnread();
+          },
+          bodyDecoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFC8B5E1), Color(0xFFF8C7D7)],
+            ),
           ),
-          child: () {
-            switch (_currentNavIndex) {
-              case 1:
-                return const KeyedSubtree(
-                  key: ValueKey('doctor-nav-add'),
-                  child: AddPatientForm(),
-                );
-              case 2:
-                return const KeyedSubtree(
-                  key: ValueKey('doctor-nav-reports'),
-                  child: DoctorReportsPage(),
-                );
-              case 3:
-                return const KeyedSubtree(
-                  key: ValueKey('doctor-nav-profile'),
-                  child: DoctorProfilePage(),
-                );
-              case 0:
-              default:
-                return KeyedSubtree(
-                  key: const ValueKey('doctor-nav-patients'),
-                  child: _PatientsView(
-                    repository: _doctorRepository,
-                    isTableView: _isTableView,
-                    onToggleView: (table) =>
-                        setState(() => _isTableView = table),
-                    searchController: _searchController,
-                    filterPatients: _filteredPatients,
-                  ),
-                );
-            }
-          }(),
-        ),
-      ),
+          body: SafeArea(
+            top: false,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 250),
+              layoutBuilder: (current, previousChildren) => Stack(
+                alignment: Alignment.topCenter,
+                children: [
+                  ...previousChildren,
+                  if (current != null)
+                    Align(alignment: Alignment.topCenter, child: current),
+                ],
+              ),
+              child: () {
+                switch (_currentNavIndex) {
+                  case 1:
+                    return const KeyedSubtree(
+                      key: ValueKey('doctor-nav-add'),
+                      child: AddPatientForm(),
+                    );
+                  case 2:
+                    return const KeyedSubtree(
+                      key: ValueKey('doctor-nav-reports'),
+                      child: DoctorReportsPage(),
+                    );
+                  case 3:
+                    return const KeyedSubtree(
+                      key: ValueKey('doctor-nav-profile'),
+                      child: DoctorProfilePage(),
+                    );
+                  case 0:
+                  default:
+                    return KeyedSubtree(
+                      key: const ValueKey('doctor-nav-patients'),
+                      child: _PatientsView(
+                        repository: _doctorRepository,
+                        isTableView: _isTableView,
+                        onToggleView: (table) =>
+                            setState(() => _isTableView = table),
+                        searchController: _searchController,
+                        filterPatients: _filteredPatients,
+                      ),
+                    );
+                }
+              }(),
+            ),
+          ),
+        );
+      },
     );
+  }
+
+  void _refreshNotificationsUnread() {
+    if (!mounted) return;
+    final queryClient = QueryClientProvider.of(context);
+    queryClient.invalidateQueries(DoctorQueryKeys.notificationsUnread());
+    queryClient.invalidateQueries(DoctorQueryKeys.notifications());
   }
 
   String _titleForIndex(int index) {

@@ -10,6 +10,8 @@ class DoctorScaffold extends StatelessWidget {
   final Widget? drawer;
   final Color navbarBackgroundColor;
   final Decoration? bodyDecoration;
+  final VoidCallback? onNotificationPressed;
+  final int notificationBadgeCount;
 
   const DoctorScaffold({
     super.key,
@@ -20,6 +22,8 @@ class DoctorScaffold extends StatelessWidget {
     this.drawer,
     this.navbarBackgroundColor = Colors.white,
     this.bodyDecoration,
+    this.onNotificationPressed,
+    this.notificationBadgeCount = 0,
   });
 
   @override
@@ -39,6 +43,8 @@ class DoctorScaffold extends StatelessWidget {
             AppNavBar(
               pageTitle: pageTitle,
               backgroundColor: navbarBackgroundColor,
+              onNotificationPressed: onNotificationPressed,
+              notificationBadgeCount: notificationBadgeCount,
             ),
             Expanded(
               child: body,

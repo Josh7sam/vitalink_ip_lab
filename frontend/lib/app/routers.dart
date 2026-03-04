@@ -7,6 +7,7 @@ import 'package:frontend/features/patient/patient_records_page.dart';
 import 'package:frontend/features/patient/patient_dosage_calendar_page.dart';
 import 'package:frontend/features/doctor/doctor_dashboard_page.dart';
 import 'package:frontend/features/doctor/add_patient_page.dart';
+import 'package:frontend/features/notifications/notification_center_page.dart';
 import 'package:frontend/features/onboarding/onboarding_page.dart';
 import 'package:frontend/features/admin/admin_dashboard_page.dart';
 
@@ -21,8 +22,10 @@ class AppRoutes {
   static const String patientTakeDosage = '/patient-take-dosage';
   static const String patientDosageCalendar = '/patient-dosage-calendar';
   static const String patientHealthReports = '/patient-health-reports';
+  static const String patientNotifications = '/patient-notifications';
   static const String doctorDashboard = '/doctor-dashboard';
   static const String doctorAddPatient = '/doctor-add-patient';
+  static const String doctorNotifications = '/doctor-notifications';
   static const String adminDashboard = '/admin-dashboard';
 }
 
@@ -65,6 +68,10 @@ class AppRouter {
           access: RouteAccess.patient,
           child: PatientDashboardShellPage(initialTabIndex: 4),
         ),
+    AppRoutes.patientNotifications: (_) => const SessionRouteGuard(
+          access: RouteAccess.patient,
+          child: NotificationCenterPage(forDoctor: false),
+        ),
     AppRoutes.doctorDashboard: (_) => const SessionRouteGuard(
           access: RouteAccess.doctor,
           child: DoctorDashboardPage(),
@@ -72,6 +79,10 @@ class AppRouter {
     AppRoutes.doctorAddPatient: (_) => const SessionRouteGuard(
           access: RouteAccess.doctor,
           child: AddPatientPage(),
+        ),
+    AppRoutes.doctorNotifications: (_) => const SessionRouteGuard(
+          access: RouteAccess.doctor,
+          child: NotificationCenterPage(forDoctor: true),
         ),
     AppRoutes.adminDashboard: (_) => const SessionRouteGuard(
           access: RouteAccess.admin,
