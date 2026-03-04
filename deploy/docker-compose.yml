@@ -1,5 +1,3 @@
-version: "3.8"
-
 # Blue-Green deployment setup for zero-downtime
 # Two identical app containers run behind Nginx.
 # During deployment, the new version starts on the inactive slot,
