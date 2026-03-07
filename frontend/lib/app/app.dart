@@ -13,6 +13,7 @@ class VitalinkApp extends StatelessWidget {
 		return QueryClientProvider(
 			client: queryClient,
 			child: MaterialApp(
+				navigatorKey: AppRouter.navigatorKey,
 				title: 'Vitalink',
 				theme: AppTheme.light,
 				// darkTheme: AppTheme.dark,

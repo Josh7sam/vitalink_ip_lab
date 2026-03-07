@@ -1,10 +1,14 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:frontend/core/constants/strings.dart';
+import 'package:frontend/core/auth/session_expiry_handler.dart';
 
 class PatientService {
-  static const String baseUrl =
-      'http://3.236.56.164/api/patient';
+  static const String baseUrl = AppStrings.apiBaseUrl;
+  static const String _patientBasePath = '/api/patient';
   static const storage = FlutterSecureStorage();
+
+  static String _endpoint(String path) => '$_patientBasePath$path';
 
   static final Dio _dio = Dio(
     BaseOptions(
@@ -26,6 +30,20 @@ class PatientService {
           }
           return handler.next(options);
         },
+        onResponse: (response, handler) async {
+          if (response.statusCode == 401) {
+            await SessionExpiryHandler.clearSessionAndRedirectToLogin();
+            return handler.reject(
+              DioException(
+                requestOptions: response.requestOptions,
+                response: response,
+                type: DioExceptionType.badResponse,
+                message: 'Authentication failed - token may be invalid or expired',
+              ),
+            );
+          }
+          return handler.next(response);
+        },
       ),
     );
   }
@@ -34,7 +52,7 @@ class PatientService {
   static Future<Map<String, dynamic>> getProfile() async {
     _setupInterceptors();
     try {
-      final response = await _dio.get('/profile');
+      final response = await _dio.get(_endpoint('/profile'));
       if (response.statusCode == 200) {
         final data = response.data['data']['patient'];
         if (data == null || data['profile_id'] == null) {
@@ -104,7 +122,7 @@ class PatientService {
   static Future<Map<String, dynamic>> getMissedDoses() async {
     _setupInterceptors();
     try {
-      final response = await _dio.get('/missed-doses');
+      final response = await _dio.get(_endpoint('/missed-doses'));
       if (response.statusCode == 200) {
         final recent = response.data['data']['recent_missed_doses'] as List;
         final missed = response.data['data']['missed_doses'] as List;
@@ -140,7 +158,7 @@ class PatientService {
         ));
       }
 
-      await _dio.post('/reports', data: formData);
+      await _dio.post(_endpoint('/reports'), data: formData);
     } on DioException catch (e) {
       throw Exception('Failed to submit report: ${e.message}');
     }
@@ -153,7 +171,7 @@ class PatientService {
     _setupInterceptors();
     try {
       final response = await _dio.post(
-        '/health-logs',
+        _endpoint('/health-logs'),
         data: {
           'type': type,
           'description': description,
@@ -174,7 +192,7 @@ class PatientService {
   }) async {
     _setupInterceptors();
     try {
-      await _dio.post('/dosage', data: {
+      await _dio.post(_endpoint('/dosage'), data: {
         'date': date,
         'dose': dose,
       });
@@ -198,7 +216,7 @@ class PatientService {
       }
 
       final response =
-          await _dio.get('/dosage-calendar', queryParameters: queryParams);
+          await _dio.get(_endpoint('/dosage-calendar'), queryParameters: queryParams);
 
       if (response.statusCode == 200) {
         final data = response.data['data'];
@@ -227,7 +245,7 @@ class PatientService {
   static Future<List<Map<String, dynamic>>> getINRHistory() async {
     _setupInterceptors();
     try {
-      final response = await _dio.get('/reports');
+      final response = await _dio.get(_endpoint('/reports'));
       if (response.statusCode == 200) {
         final inrHistory =
             response.data['data']['report']['inr_history'] as List;
@@ -257,7 +275,7 @@ class PatientService {
   static Future<List<Map<String, dynamic>>> getPrescriptions() async {
     _setupInterceptors();
     try {
-      final response = await _dio.get('/reports');
+      final response = await _dio.get(_endpoint('/reports'));
       if (response.statusCode == 200) {
         final report = response.data['data']['report'];
         final prescriptions = <Map<String, dynamic>>[];
@@ -298,7 +316,7 @@ class PatientService {
   static Future<Map<String, dynamic>> getLatestINRData() async {
     _setupInterceptors();
     try {
-      final response = await _dio.get('/reports');
+      final response = await _dio.get(_endpoint('/reports'));
       if (response.statusCode == 200) {
         final inrHistory =
             response.data['data']['report']['inr_history'] as List;
@@ -435,7 +453,7 @@ class PatientService {
         data['medical_config'] = medicalConfig;
       }
 
-      final response = await _dio.put('/profile', data: data);
+      final response = await _dio.put(_endpoint('/profile'), data: data);
 
       if (response.statusCode != 200) {
         throw Exception('Failed to update profile');
@@ -451,7 +469,7 @@ class PatientService {
   }) async {
     _setupInterceptors();
     try {
-      final response = await _dio.get('/doctor-updates', queryParameters: {
+      final response = await _dio.get(_endpoint('/doctor-updates'), queryParameters: {
         'unread_only': unreadOnly.toString(),
         'limit': limit,
       });
@@ -479,7 +497,7 @@ class PatientService {
   static Future<void> markDoctorUpdateAsRead(String eventId) async {
     _setupInterceptors();
     try {
-      final response = await _dio.patch('/doctor-updates/$eventId/read');
+      final response = await _dio.patch(_endpoint('/doctor-updates/$eventId/read'));
       if (response.statusCode != 200) {
         throw Exception('Failed to mark doctor update as read');
       }

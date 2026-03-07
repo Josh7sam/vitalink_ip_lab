@@ -5,9 +5,14 @@ class AppStrings {
   static const String apiBaseUrlDefine = 'API_BASE_URL';
 
   /// Base URL for the backend API.
+  ///
+  /// On Flutter Web, default to an empty string so requests use same-origin
+  /// paths (e.g. `/api/...`) and avoid mixed-content issues on HTTPS hosts.
   static const String apiBaseUrl = String.fromEnvironment(
     apiBaseUrlDefine,
-    defaultValue: 'http://3.236.56.164',
+    defaultValue: bool.fromEnvironment('dart.library.js_util')
+        ? ''
+        : 'http://3.236.56.164',
   );
 
   /// Auth endpoints.

@@ -31,6 +31,8 @@ class AppRoutes {
 
 class AppRouter {
   static const String initialRoute = AppRoutes.sessionBootstrap;
+  static final GlobalKey<NavigatorState> navigatorKey =
+      GlobalKey<NavigatorState>();
 
   static final Map<String, WidgetBuilder> routes = {
     '/': (_) => const SessionBootstrapPage(),

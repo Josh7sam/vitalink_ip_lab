@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:frontend/core/constants/strings.dart';
+import 'package:frontend/core/auth/session_expiry_handler.dart';
 import 'package:frontend/core/storage/secure_storage.dart';
 
 class ApiException implements Exception {
@@ -28,7 +29,9 @@ class ApiClient {
                 receiveTimeout: const Duration(seconds: 20),
               ),
             ),
-       _secureStorage = secureStorage ?? SecureStorage();
+       _secureStorage = secureStorage ?? SecureStorage() {
+    _configureInterceptors();
+  }
 
   final Dio _dio;
   final SecureStorage _secureStorage;
@@ -37,6 +40,38 @@ class ApiClient {
 
   void _logDebug(String message) {
     if (kDebugMode) debugPrint(message);
+  }
+
+  void _configureInterceptors() {
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onError: (error, handler) async {
+          if (_shouldHandleUnauthorized(error)) {
+            await SessionExpiryHandler.clearSessionAndRedirectToLogin();
+          }
+          handler.next(error);
+        },
+      ),
+    );
+  }
+
+  bool _shouldHandleUnauthorized(DioException error) {
+    if (error.response?.statusCode != 401) return false;
+
+    final requiresAuth = error.requestOptions.extra['requiresAuth'] == true;
+    final authHeader = error.requestOptions.headers['Authorization'];
+    final hasAuthHeader = authHeader is String && authHeader.trim().isNotEmpty;
+    return requiresAuth || hasAuthHeader;
+  }
+
+  Options _buildRequestOptions({
+    required Map<String, String> headers,
+    required bool requiresAuth,
+  }) {
+    return Options(
+      headers: headers,
+      extra: {'requiresAuth': requiresAuth},
+    );
   }
 
   Future<Response<Map<String, dynamic>>> _sendWithRetry(
@@ -94,7 +129,10 @@ class ApiClient {
         () => _dio.post<Map<String, dynamic>>(
           path,
           data: data,
-          options: Options(headers: headers),
+          options: _buildRequestOptions(
+            headers: headers,
+            requiresAuth: authenticated,
+          ),
         ),
       );
       return _normalizeResponse(response);
@@ -119,7 +157,10 @@ class ApiClient {
         () => _dio.get<Map<String, dynamic>>(
           path,
           queryParameters: queryParameters,
-          options: Options(headers: headers),
+          options: _buildRequestOptions(
+            headers: headers,
+            requiresAuth: authenticated,
+          ),
         ),
         retryOnFailure: true,
       );
@@ -135,7 +176,10 @@ class ApiClient {
         final retryResponse = await _sendWithRetry(
           () => _dio.get<Map<String, dynamic>>(
             path,
-            options: Options(headers: headers),
+            options: _buildRequestOptions(
+              headers: headers,
+              requiresAuth: authenticated,
+            ),
           ),
           retryOnFailure: true,
         );
@@ -160,7 +204,10 @@ class ApiClient {
         () => _dio.put<Map<String, dynamic>>(
           path,
           data: data,
-          options: Options(headers: headers),
+          options: _buildRequestOptions(
+            headers: headers,
+            requiresAuth: authenticated,
+          ),
         ),
       );
       _logDebug('PUT Response status: ${response.statusCode}');
@@ -184,7 +231,10 @@ class ApiClient {
         () => _dio.patch<Map<String, dynamic>>(
           path,
           data: data,
-          options: Options(headers: headers),
+          options: _buildRequestOptions(
+            headers: headers,
+            requiresAuth: authenticated,
+          ),
         ),
       );
       return _normalizeResponse(response);
@@ -208,7 +258,10 @@ class ApiClient {
         () => _dio.delete<Map<String, dynamic>>(
           path,
           data: data,
-          options: Options(headers: headers),
+          options: _buildRequestOptions(
+            headers: headers,
+            requiresAuth: authenticated,
+          ),
         ),
       );
       _logDebug('DELETE Response status: ${response.statusCode}');
@@ -235,7 +288,10 @@ class ApiClient {
         () => _dio.get<Map<String, dynamic>>(
           path,
           queryParameters: queryParameters,
-          options: Options(headers: headers),
+          options: _buildRequestOptions(
+            headers: headers,
+            requiresAuth: authenticated,
+          ),
         ),
         retryOnFailure: true,
       );
@@ -258,7 +314,10 @@ class ApiClient {
         final retryResponse = await _sendWithRetry(
           () => _dio.get<Map<String, dynamic>>(
             path,
-            options: Options(headers: headers),
+            options: _buildRequestOptions(
+              headers: headers,
+              requiresAuth: authenticated,
+            ),
           ),
           retryOnFailure: true,
         );
