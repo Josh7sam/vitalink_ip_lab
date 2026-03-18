@@ -7,7 +7,7 @@ class AppStrings {
   /// Base URL for the backend API.
   static const String apiBaseUrl = String.fromEnvironment(
     apiBaseUrlDefine,
-    defaultValue: 'http://3.236.56.164',
+    defaultValue: 'https://vitalink-ip-lab-1.onrender.com',
   );
 
   /// Auth endpoints.

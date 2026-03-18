@@ -3,7 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class PatientService {
   static const String baseUrl =
-      'http://3.236.56.164/api/patient';
+      'https://vitalink-ip-lab-1.onrender.com/api/patient';
   static const storage = FlutterSecureStorage();
 
   static final Dio _dio = Dio(
