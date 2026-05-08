@@ -27,8 +27,7 @@ The main goal of Vitalink is to improve patient safety by enabling continuous mo
 
 ## 👨‍💻 Contributors
 
-- Your Name
-- Friend's Name
+- Joshua Sam M
 
 ## 📄 License
 
